@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% set page = "runs" %}
+{% block body %}
+<h1>Collection runs</h1>
+<p class="sub">The last {{ rows | length }} fetch attempts.</p>
+
+<h2>Run a collection</h2>
+{% if job_running %}
+  <div class="card" style="margin-bottom:14px; border-color:#55411a;">
+    <div class="k">In progress</div>
+    <div style="margin:6px 0;">
+      Collecting <strong>{{ job.slug }}</strong> — started {{ job.started_at | age }}.
+      This drives a real browser and can take a few minutes.
+    </div>
+    <div class="muted">This page does not refresh itself; reload to see progress.</div>
+    {% if job_log %}
+    <pre class="mono" style="margin-top:10px; max-height:180px; overflow:auto; background:var(--bg); padding:10px; border-radius:8px; white-space:pre-wrap;">{% for line in job_log %}{{ line }}
+{% endfor %}</pre>
+    {% endif %}
+  </div>
+{% else %}
+  {% if job %}
+    <div class="card" style="margin-bottom:14px; border-color:{{ '#23503c' if job.returncode == 0 else '#5a2529' }};">
+      <div class="k">Last run</div>
+      <div style="margin:6px 0;">
+        <strong>{{ job.slug }}</strong> finished {{ job.finished_at | age }} —
+        exit code {{ job.returncode }}
+        <span class="pill {{ 'ok' if job.returncode == 0 else 'bad' }}">{{ 'ok' if job.returncode == 0 else 'failed' }}</span>
+      </div>
+      {% if job_log %}
+      <pre class="mono" style="margin-top:10px; max-height:180px; overflow:auto; background:var(--bg); padding:10px; border-radius:8px; white-space:pre-wrap;">{% for line in job_log %}{{ line }}
+{% endfor %}</pre>
+      {% endif %}
+    </div>
+  {% endif %}
+  <form method="post" action="/runs" class="filters">
+    <select name="slug">
+      {% for s in runnable %}
+        <option value="{{ s.slug }}">{{ s.slug }} — {{ s.name }} ({{ s.status }})</option>
+      {% endfor %}
+    </select>
+    <button type="submit">Run now</button>
+  </form>
+  {% for s in runnable if s.order_probes %}
+    <p class="muted" style="margin:4px 0;">
+      <strong>{{ s.slug }}</strong> initiates a deposit request (no funds move) for:
+      {{ s.order_probes | join(", ") }}.
+    </p>
+  {% endfor %}
+{% endif %}
+
+<div class="wrap"><table>
+  <thead>
+    <tr><th>#</th><th>Started</th><th>Site</th><th>Fetcher</th><th>Status</th>
+        <th>HTTP</th><th>Candidates</th><th>New</th><th>Evidence</th><th>Error</th></tr>
+  </thead>
+  <tbody>
+  {% for r in rows %}
+    <tr>
+      <td class="muted">{{ r.id }}</td>
+      <td class="muted">{{ r.started_at | age }}</td>
+      <td>{{ sites[r.site_id].slug if r.site_id in sites else r.site_id }}</td>
+      <td class="muted">{{ r.fetcher }}</td>
+      <td>
+        <span class="pill {{ 'ok' if r.status == 'ok' else ('warn' if r.status == 'partial' else 'bad') }}">
+          {{ r.status }}
+        </span>
+      </td>
+      <td class="muted">{{ r.http_status or "-" }}</td>
+      <td>{{ r.candidates_found }}</td>
+      <td>{{ r.accounts_new }}</td>
+      <td class="muted">{{ evidence_counts.get(r.id, 0) }}</td>
+      <td class="muted">{{ (r.error or "")[:70] }}</td>
+    </tr>
+  {% else %}
+    <tr><td colspan="10" class="empty">No runs recorded.</td></tr>
+  {% endfor %}
+  </tbody>
+</table></div>
+{% endblock %}

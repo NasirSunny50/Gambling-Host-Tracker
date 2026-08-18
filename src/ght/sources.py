@@ -1,0 +1,247 @@
+"""Per-site extraction config, loaded from sources/<slug>.yaml.
+
+These files deliberately live in git rather than in the database: when a site redesigns
+and someone rewrites a selector, the git history is the audit trail of what the collector
+was looking for on any given date.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from pathlib import Path
+
+import yaml
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from ght.config import settings
+from ght.normalize.channel import ALL_CHANNELS
+
+
+class _Strict(BaseModel):
+    """Base for config models: an unknown key is a typo, and a silently ignored typo is a
+    selector that never runs. Better to fail the file loudly - scan_sources isolates it so
+    one bad file does not stop the others."""
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class SourceUrl(_Strict):
+    url: str
+    type: str = "deposit"
+    current: bool = True
+
+
+class Block(_Strict):
+    """One payment-method block on the page.
+
+    Pairing the channel with the selector in config is what makes a hit high confidence:
+    we know it is a bKash number because the config says this container is the bKash box,
+    not because we guessed from nearby words.
+    """
+
+    channel: str
+    value: str
+    container: str | None = None
+    account_type: str | None = None
+    # Selector, relative to the container, for the payee/merchant name printed beside the
+    # number. Optional: most bank blocks label the name well enough for the normalizer.
+    holder: str | None = None
+    # Canonical bank name for this block, when the page never writes it beside the number.
+    # A bank-transfer panel names the recipient bank only in a dropdown listing every
+    # option, so reading it off the page would be a coin flip between four banks; the
+    # config selected the bank, so the config is what knows it.
+    bank_name: str | None = None
+
+    @field_validator("channel")
+    @classmethod
+    def _known_channel(cls, value: str) -> str:
+        if value not in ALL_CHANNELS:
+            raise ValueError(f"unknown channel {value!r}; expected one of {sorted(ALL_CHANNELS)}")
+        return value
+
+    @model_validator(mode="after")
+    def _holder_needs_a_container(self) -> Block:
+        """A payee name is only meaningful inside the block it belongs to.
+
+        Unscoped, the selector searches the whole document and pins the first name it finds
+        onto every account on the page — including accounts it has nothing to do with. A
+        wrong holder name is worse than a missing one: it is the field an investigator
+        reads as the identity behind the wallet.
+        """
+        if self.holder and not self.container:
+            raise ValueError(
+                f"holder {self.holder!r} needs a container; "
+                "an unscoped holder selector attributes the wrong name"
+            )
+        return self
+
+
+class Step(_Strict):
+    """One click in a multi-step deposit flow.
+
+    Some sites do not print any account on the deposit page itself: you pick a method,
+    confirm, and the number only appears on the payment provider's page you land on. The
+    flow is config rather than code because each site's click path differs, and a redesign
+    that moves a button should be a YAML diff in the audit trail like any other selector.
+    """
+
+    # Exactly one of these. Some payee details only appear once a dropdown is set - a
+    # bank transfer panel shows nothing at all until a recipient bank is chosen.
+    click: str | None = None
+    select: str | None = None
+    # The option label to choose, when this step is a select.
+    option: str | None = None
+    # Selector to wait for afterwards, so the next step acts on a rendered page.
+    wait_for: str | None = None
+    # A step that may legitimately be absent (an interstitial that only shows sometimes).
+    optional: bool = False
+
+    @model_validator(mode="after")
+    def _one_action(self) -> Step:
+        if bool(self.click) == bool(self.select):
+            raise ValueError("a step needs exactly one of click or select")
+        if self.select and not self.option:
+            raise ValueError(f"select {self.select!r} needs an option to choose")
+        return self
+
+    @property
+    def target(self) -> str:
+        """The selector this step acts on, whichever kind of step it is."""
+        return self.click or self.select or ""
+
+
+class Probe(_Strict):
+    """One method's details, reached by its own clicks and read by its own selectors.
+
+    A deposit page that shows one payee at a time needs several visits to enumerate, and
+    each visit lands on different markup. Keeping the blocks beside the flow that reveals
+    them is what preserves the channel guarantee: the bKash number is known to be bKash
+    because it came from the block that opened the bKash panel, not from a guess about a
+    page holding six panels at once.
+    """
+
+    name: str
+    flow: list[Step] = Field(default_factory=list)
+    wait_for: str | None = None
+    blocks: list[Block] = Field(default_factory=list)
+    # Selector for a payee that has a name but no account number. Recorded as a merchant
+    # sighting instead of an account, because there is no number to key an identity on.
+    merchant: str | None = None
+    # Channel a merchant sighting belongs to. Blocks carry their own channel; a name-only
+    # probe has no block to carry it.
+    channel: str | None = None
+    # True when reaching this probe's payee requires confirming a deposit, which initiates
+    # a deposit request on the operator (no funds move, nothing is paid). Surfaced in the
+    # portal so it is clear which probes have that side effect.
+    creates_order: bool = False
+
+
+class SourceConfig(_Strict):
+    slug: str
+    name: str
+    status: str = "active"
+    fetcher: str = "http"  # http | browser
+    urls: list[SourceUrl] = Field(default_factory=list)
+    blocks: list[Block] = Field(default_factory=list)
+    # Clicks to walk before capturing. Browser fetcher only; ignored by the HTTP fetcher.
+    flow: list[Step] = Field(default_factory=list)
+    # Selector that marks the final page as ready, checked after the flow finishes.
+    wait_for: str | None = None
+    # Path to a Playwright storage_state JSON for sites whose deposit page needs a login.
+    # The file is produced by a human signing in themselves; no credentials live in config.
+    auth_state: str | None = None
+    # Force a specific browser for the browser fetcher (msedge / chrome). Left unset, the
+    # fetcher tries the bundled Chromium first and falls back to installed browsers.
+    browser_channel: str | None = None
+    # Substring of the URL of the iframe holding the deposit UI. Payment panels are often
+    # a separate app embedded in the account page, and neither the flow clicks nor the
+    # selectors reach into it from the top-level document.
+    frame: str | None = None
+    # Per-method probes. A source uses either these or the single flow/blocks pair above.
+    probes: list[Probe] = Field(default_factory=list)
+    ignore_numbers: list[str] = Field(default_factory=list)
+    notes: str | None = None
+
+    @field_validator("fetcher")
+    @classmethod
+    def _known_fetcher(cls, value: str) -> str:
+        if value not in {"http", "browser"}:
+            raise ValueError(f"unknown fetcher {value!r}")
+        return value
+
+    @model_validator(mode="after")
+    def _flow_needs_browser(self) -> SourceConfig:
+        """A click flow is meaningless without a browser to click with.
+
+        Catching this at load time matters: an http-fetcher site with a flow would run
+        happily, extract nothing, and look like a site with no accounts rather than a
+        misconfiguration.
+        """
+        if (self.flow or self.probes) and self.fetcher != "browser":
+            raise ValueError(f"flow requires fetcher: browser, got {self.fetcher!r}")
+        if self.probes and (self.flow or self.blocks):
+            raise ValueError(
+                "use either probes or a single flow/blocks pair, not both: "
+                "with probes configured the top-level flow and blocks would never run"
+            )
+        return self
+
+    @property
+    def current_urls(self) -> list[str]:
+        """Current URLs first, then the known mirrors as fallbacks."""
+        return [u.url for u in self.urls if u.current] + [u.url for u in self.urls if not u.current]
+
+
+def load_source(slug: str, sources_dir: Path | None = None) -> SourceConfig:
+    path = (sources_dir or settings.sources_dir) / f"{slug}.yaml"
+    if not path.exists():
+        raise FileNotFoundError(f"no source config at {path}")
+    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    return SourceConfig.model_validate(data)
+
+
+@dataclass(frozen=True)
+class BrokenSource:
+    """A config file that would not parse, kept so the CLI can report it."""
+
+    path: Path
+    error: str
+
+
+def scan_sources(sources_dir: Path | None = None) -> tuple[list[SourceConfig], list[BrokenSource]]:
+    """Load every site config, separating the good files from the broken ones.
+
+    A typo in one YAML must not stop collection from every other site: these operators
+    rotate accounts daily, and a day of missed collection cannot be gone back for. So the
+    broken file is reported and the rest of the run proceeds.
+
+    Files whose names start with an underscore are skipped entirely.
+    """
+    directory = sources_dir or settings.sources_dir
+    configs: list[SourceConfig] = []
+    broken: list[BrokenSource] = []
+
+    for path in sorted(directory.glob("*.yaml")):
+        if path.stem.startswith("_"):
+            continue
+        try:
+            data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+            configs.append(SourceConfig.model_validate(data))
+        except Exception as exc:  # noqa: BLE001 - a bad file is reported, not fatal
+            broken.append(BrokenSource(path=path, error=_first_error_line(exc)))
+    return configs, broken
+
+
+def _first_error_line(exc: Exception) -> str:
+    """Pydantic renders a multi-line report; the CLI table only has room for the reason."""
+    for line in str(exc).splitlines():
+        stripped = line.strip()
+        if stripped.startswith("Value error, "):
+            return stripped.removeprefix("Value error, ").split(" [type=")[0]
+    return f"{type(exc).__name__}: {str(exc).splitlines()[0]}"
+
+
+def load_all_sources(sources_dir: Path | None = None) -> list[SourceConfig]:
+    """Every config that parses. Use :func:`scan_sources` when the failures matter too."""
+    configs, _ = scan_sources(sources_dir)
+    return configs

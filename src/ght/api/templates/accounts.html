@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% set page = "accounts" %}
+{% block body %}
+<h1>Accounts</h1>
+<p class="sub">{{ rows | length }} account{{ "" if rows | length == 1 else "s" }} matching this filter.</p>
+
+<form class="filters" method="get" action="/accounts">
+  <input type="search" name="q" value="{{ q }}" placeholder="number, holder or bank">
+  <select name="channel">
+    <option value="">All channels</option>
+    {% for c in channels %}
+      <option value="{{ c }}" {{ "selected" if c == channel }}>{{ c | channel }}</option>
+    {% endfor %}
+  </select>
+  <select name="status">
+    {% for value, label in [("all", "Any status"), ("active", "Active"), ("inactive", "Gone"), ("review", "Needs review")] %}
+      <option value="{{ value }}" {{ "selected" if value == status }}>{{ label }}</option>
+    {% endfor %}
+  </select>
+  <button type="submit">Filter</button>
+  <a class="right" href="/accounts.csv?channel={{ channel or '' }}&status={{ status }}&q={{ q }}">Download CSV</a>
+</form>
+
+<div class="wrap"><table>
+  <thead>
+    <tr>
+      <th>Channel</th><th>Number</th><th>Holder</th><th>Bank</th>
+      <th>Confidence</th><th>Seen</th><th>Last seen</th><th>Status</th>
+    </tr>
+  </thead>
+  <tbody>
+  {% for a in rows %}
+    <tr>
+      <td>{{ a.channel | channel }}</td>
+      <td class="mono"><a href="/accounts/{{ a.id }}">{{ a.account_number }}</a></td>
+      <td>{{ a.holder_name or "-" }}</td>
+      <td>{{ a.bank_name or "-" }}</td>
+      <td>
+        <span class="pill {{ 'ok' if a.confidence >= 0.9 else ('warn' if a.confidence >= 0.6 else 'bad') }}">
+          {{ "%.1f" | format(a.confidence) }}
+        </span>
+      </td>
+      <td>{{ a.observation_count }}&times;</td>
+      <td class="muted">{{ a.last_seen_at | age }}</td>
+      <td>
+        {% if a.needs_review %}<span class="pill warn">review</span>
+        {% elif a.is_active %}<span class="pill ok">active</span>
+        {% else %}<span class="pill">gone</span>{% endif %}
+      </td>
+    </tr>
+  {% else %}
+    <tr><td colspan="8" class="empty">Nothing matches that filter.</td></tr>
+  {% endfor %}
+  </tbody>
+</table></div>
+{% endblock %}

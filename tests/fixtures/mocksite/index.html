@@ -1,0 +1,40 @@
+<!doctype html>
+<html><head><title>Make a deposit</title></head>
+<body>
+  <span class="ui-button__container"><span class="ui-caption">Make a deposit</span></span>
+
+  <div id="grid" style="display:none">
+  <h1>Recommended</h1>
+  <div class="payment-cell payment_item paykassma_bkash BD payment-cell--recommended"
+       id="bkash_b_webdef_1" data-agent="paykassma2" data-method="bkash_b_webdef"
+       data-rawmethod="fast_bkash" data-type="e_wallet">
+    <span class="payment-cell-name__caption">Fast bKash</span>
+  </div>
+  <div class="payment-cell payment_item paykassma_nagad BD payment-cell--recommended"
+       id="nagad_b_webdef_1" data-agent="paykassma2" data-method="nagad_b_webdef"
+       data-rawmethod="fast_nagad" data-type="e_wallet">
+    <span class="payment-cell-name__caption">Fast Nagad</span>
+  </div>
+
+  </div>
+
+  <div id="modal" style="display:none">
+    <div class="payment_modal_btn" id="deposit_button">Confirm</div>
+  </div>
+
+  <script>
+    // The grid is behind the "Make a deposit" button, as on the real site.
+    document.querySelector('.ui-caption').addEventListener('click', function () {
+      setTimeout(function () { document.getElementById('grid').style.display = 'block'; }, 150);
+    });
+    // Number is NOT here - it only exists after Confirm, same as the real flow.
+    document.querySelectorAll('.payment-cell').forEach(function (cell) {
+      cell.addEventListener('click', function () {
+        setTimeout(function () { document.getElementById('modal').style.display = 'block'; }, 150);
+      });
+    });
+    document.getElementById('deposit_button').addEventListener('click', function () {
+      setTimeout(function () { location.href = './psp.html'; }, 150);
+    });
+  </script>
+</body></html>

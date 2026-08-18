@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% set page = "merchants" %}
+{% block body %}
+<h1>Merchants</h1>
+<p class="sub">
+  Payees that show a name but never a receiving account number &mdash;
+  {{ rows | length }} distinct name{{ "" if rows | length == 1 else "s" }} across {{ total }} sighting{{ "" if total == 1 else "s" }}.
+</p>
+
+<div class="card" style="margin-bottom:18px">
+  <p class="muted" style="margin:0">
+    These come from methods that hand off to the payment provider's own checkout. The name
+    rotates per deposit request, so a name missing today does not mean it is out of use;
+    nothing here is ever marked gone. The value is the pool of names accumulating over time.
+  </p>
+</div>
+
+<div class="wrap"><table>
+  <thead><tr><th>Merchant</th><th>Channel</th><th>Probe</th><th>Times seen</th><th>First seen</th><th>Last seen</th></tr></thead>
+  <tbody>
+  {% for name, channel, probe, times, first_seen, last_seen in rows %}
+    <tr>
+      <td>{{ name }}</td>
+      <td>{{ channel | channel }}</td>
+      <td class="muted mono">{{ probe }}</td>
+      <td>{{ times }}&times;</td>
+      <td class="muted">{{ first_seen | age }}</td>
+      <td class="muted">{{ last_seen | age }}</td>
+    </tr>
+  {% else %}
+    <tr><td colspan="6" class="empty">No name-only payees recorded.</td></tr>
+  {% endfor %}
+  </tbody>
+</table></div>
+{% endblock %}

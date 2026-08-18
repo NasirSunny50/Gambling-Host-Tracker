@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Gambling Host Tracker{% endblock %}</title>
+  <style>
+    /* Self-contained on purpose: this runs on analyst machines that may be offline, and
+       a portal over evidence should not be phoning out to a CDN on every page load. */
+    :root {
+      --bg: #10141c; --panel: #171d28; --panel-2: #1e2635; --line: #2a3444;
+      --text: #e6ecf5; --muted: #8b98ad; --accent: #4da3ff;
+      --ok: #3ecf8e; --warn: #f0b429; --bad: #f2555a;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; background: var(--bg); color: var(--text);
+      font: 14px/1.5 ui-sans-serif, system-ui, "Segoe UI", Roboto, sans-serif;
+    }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    header {
+      display: flex; align-items: center; gap: 24px; flex-wrap: wrap;
+      padding: 14px 24px; background: var(--panel); border-bottom: 1px solid var(--line);
+    }
+    header .brand { font-weight: 700; letter-spacing: .02em; }
+    header nav { display: flex; gap: 18px; }
+    header nav a { color: var(--muted); }
+    header nav a.on, header nav a:hover { color: var(--text); text-decoration: none; }
+    main { padding: 24px; max-width: 1180px; margin: 0 auto; }
+    h1 { font-size: 20px; margin: 0 0 4px; }
+    h2 { font-size: 15px; margin: 28px 0 10px; color: var(--muted); font-weight: 600;
+         text-transform: uppercase; letter-spacing: .06em; }
+    .sub { color: var(--muted); margin: 0 0 20px; }
+    .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+    .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; }
+    .card .n { font-size: 26px; font-weight: 700; }
+    .card .k { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .05em; }
+    .wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+    table { width: 100%; border-collapse: collapse; white-space: nowrap; }
+    th, td { text-align: left; padding: 9px 14px; border-bottom: 1px solid var(--line); }
+    th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .05em; font-weight: 600; }
+    tr:last-child td { border-bottom: none; }
+    tbody tr:hover { background: var(--panel-2); }
+    .mono { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; }
+    .pill { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px;
+            border: 1px solid var(--line); background: var(--panel-2); color: var(--muted); }
+    .pill.ok { color: var(--ok); border-color: #23503c; }
+    .pill.warn { color: var(--warn); border-color: #55411a; }
+    .pill.bad { color: var(--bad); border-color: #5a2529; }
+    .muted { color: var(--muted); }
+    form.filters { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; align-items: center; }
+    input, select, button {
+      font: inherit; color: var(--text); background: var(--panel-2);
+      border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px;
+    }
+    button { cursor: pointer; }
+    button:hover { border-color: var(--accent); }
+    .right { margin-left: auto; }
+    .empty { padding: 28px; text-align: center; color: var(--muted); }
+    dl.kv { display: grid; grid-template-columns: 160px 1fr; gap: 6px 16px; margin: 0; }
+    dl.kv dt { color: var(--muted); }
+    dl.kv dd { margin: 0; }
+  </style>
+</head>
+<body>
+  <header>
+    <span class="brand">Gambling Host Tracker</span>
+    <nav>
+      <a href="/" class="{{ 'on' if page == 'dashboard' }}">Dashboard</a>
+      <a href="/accounts" class="{{ 'on' if page == 'accounts' }}">Accounts</a>
+      <a href="/merchants" class="{{ 'on' if page == 'merchants' }}">Merchants</a>
+      <a href="/runs" class="{{ 'on' if page == 'runs' }}">Runs</a>
+      <a href="/alerts" class="{{ 'on' if page == 'alerts' }}">Alerts</a>
+    </nav>
+  </header>
+  <main>{% block body %}{% endblock %}</main>
+</body>
+</html>

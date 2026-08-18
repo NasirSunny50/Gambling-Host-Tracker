@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% set page = "accounts" %}
+{% block title %}{{ account.account_number }} &mdash; Gambling Host Tracker{% endblock %}
+{% block body %}
+<h1 class="mono">{{ account.account_number }}</h1>
+<p class="sub">
+  {{ account.channel | channel }}
+  {% if account.needs_review %}<span class="pill warn">needs review</span>
+  {% elif account.is_active %}<span class="pill ok">active</span>
+  {% else %}<span class="pill">gone</span>{% endif %}
+</p>
+
+<h2>Details</h2>
+<div class="card">
+  <dl class="kv">
+    <dt>Holder</dt><dd>{{ account.holder_name or "-" }}</dd>
+    <dt>Bank</dt><dd>{{ account.bank_name or "-" }}</dd>
+    <dt>Branch</dt><dd>{{ account.branch or "-" }}</dd>
+    <dt>Operator</dt><dd>{{ account.operator or "-" }}</dd>
+    <dt>Account type</dt><dd>{{ account.account_type or "-" }}</dd>
+    <dt>Confidence</dt><dd>{{ "%.2f" | format(account.confidence) }}</dd>
+    <dt>Observations</dt><dd>{{ account.observation_count }}</dd>
+    <dt>First seen</dt><dd>{{ account.first_seen_at }} <span class="muted">({{ account.first_seen_at | age }})</span></dd>
+    <dt>Last seen</dt><dd>{{ account.last_seen_at }} <span class="muted">({{ account.last_seen_at | age }})</span></dd>
+  </dl>
+</div>
+
+<h2>Seen on</h2>
+<div class="wrap"><table>
+  <thead><tr><th>Site</th><th>Name</th><th>First seen</th><th>Last seen</th><th>Times</th></tr></thead>
+  <tbody>
+  {% for site, link in sites %}
+    <tr>
+      <td>{{ site.slug }}</td>
+      <td>{{ site.name }}</td>
+      <td class="muted">{{ link.first_seen_at | age }}</td>
+      <td class="muted">{{ link.last_seen_at | age }}</td>
+      <td>{{ link.observation_count }}</td>
+    </tr>
+  {% else %}
+    <tr><td colspan="5" class="empty">No site links.</td></tr>
+  {% endfor %}
+  </tbody>
+</table></div>
+
+<h2>Observations</h2>
+<div class="wrap"><table>
+  <thead><tr><th>When</th><th>Run</th><th>Raw text</th><th>Origin</th><th>Confidence</th></tr></thead>
+  <tbody>
+  {% for o in observations %}
+    <tr>
+      <td class="muted">{{ o.observed_at | age }}</td>
+      <td>#{{ o.run_id }}</td>
+      <td class="mono">{{ o.raw_text[:70] }}</td>
+      <td class="muted mono">{{ o.origin[:44] }}</td>
+      <td>{{ "%.1f" | format(o.confidence) }}</td>
+    </tr>
+  {% else %}
+    <tr><td colspan="5" class="empty">No observations.</td></tr>
+  {% endfor %}
+  </tbody>
+</table></div>
+
+<h2>Evidence from those runs</h2>
+<p class="sub muted">Stored page bytes and screenshots, addressed by content hash.</p>
+<div class="wrap"><table>
+  <thead><tr><th>Run</th><th>Kind</th><th>SHA-256</th><th>Bytes</th><th>Path</th></tr></thead>
+  <tbody>
+  {% for e in evidence %}
+    <tr>
+      <td>#{{ e.run_id }}</td>
+      <td>{{ e.kind }}</td>
+      <td class="mono muted">{{ e.sha256[:16] }}&hellip;</td>
+      <td>{{ "{:,}".format(e.bytes) }}</td>
+      <td class="mono muted">{{ e.path }}</td>
+    </tr>
+  {% else %}
+    <tr><td colspan="5" class="empty">No evidence stored.</td></tr>
+  {% endfor %}
+  </tbody>
+</table></div>
+{% endblock %}

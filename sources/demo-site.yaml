@@ -1,0 +1,38 @@
+# Reference config, kept in sync with tests/fixtures/html/demo_site_deposit.html.
+# Copy this when adding a real target after recon.
+slug: demo-site
+name: Demo Betting (fixture)
+status: active
+fetcher: http
+
+urls:
+  - url: https://demo-site.invalid/deposit
+    type: deposit
+    current: true
+  - url: https://demo-mirror.invalid/deposit
+    type: deposit
+    current: false
+
+# Each block pairs a channel with the element holding its number. Because the channel is
+# stated here rather than guessed from nearby words, these hits are high confidence.
+blocks:
+  - channel: bkash
+    container: ".payment-method.bkash"
+    value: ".account-number"
+  - channel: nagad
+    container: ".payment-method.nagad"
+    value: ".account-number"
+  - channel: rocket
+    container: ".payment-method.rocket"
+    value: ".account-number"
+  - channel: bank_transfer
+    container: ".bank-details"
+    value: ".acc-no"
+
+# Published on the page but not a deposit account.
+ignore_numbers:
+  - "01500000000" # support / WhatsApp hotline
+
+notes: |
+  Fixture site used by the test suite. The support hotline in the header and the ticket id
+  in the fineprint are both deliberate traps for the regex sweep.

@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% set page = "dashboard" %}
+{% block body %}
+<h1>Overview</h1>
+<p class="sub">Payment accounts collected from the configured deposit pages.</p>
+
+<div class="cards">
+  <div class="card"><div class="n">{{ totals.active }}</div><div class="k">Active accounts</div></div>
+  <div class="card"><div class="n">{{ totals.accounts }}</div><div class="k">Total ever seen</div></div>
+  <div class="card"><div class="n">{{ totals.review }}</div><div class="k">Needs review</div></div>
+  <div class="card"><div class="n">{{ totals.sites }}</div><div class="k">Sites tracked</div></div>
+</div>
+
+<h2>Active by channel</h2>
+{% if by_channel %}
+<div class="wrap"><table>
+  <thead><tr><th>Channel</th><th>Accounts</th></tr></thead>
+  <tbody>
+  {% for channel, count in by_channel %}
+    <tr>
+      <td><a href="/accounts?channel={{ channel }}&status=active">{{ channel | channel }}</a></td>
+      <td>{{ count }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table></div>
+{% else %}<div class="wrap"><div class="empty">Nothing collected yet.</div></div>{% endif %}
+
+<h2>Newest accounts</h2>
+{% if newest %}
+<div class="wrap"><table>
+  <thead><tr><th>Channel</th><th>Number</th><th>Holder</th><th>Bank</th><th>First seen</th></tr></thead>
+  <tbody>
+  {% for a in newest %}
+    <tr>
+      <td>{{ a.channel | channel }}</td>
+      <td class="mono"><a href="/accounts/{{ a.id }}">{{ a.account_number }}</a></td>
+      <td>{{ a.holder_name or "-" }}</td>
+      <td>{{ a.bank_name or "-" }}</td>
+      <td class="muted">{{ a.first_seen_at | age }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table></div>
+{% else %}<div class="wrap"><div class="empty">Nothing collected yet.</div></div>{% endif %}
+
+<h2>Recent runs</h2>
+<div class="wrap"><table>
+  <thead><tr><th>Started</th><th>Site</th><th>Status</th><th>Candidates</th><th>New</th><th>Error</th></tr></thead>
+  <tbody>
+  {% for r in runs %}
+    <tr>
+      <td class="muted">{{ r.started_at | age }}</td>
+      <td>{{ sites[r.site_id].slug if r.site_id in sites else r.site_id }}</td>
+      <td>
+        <span class="pill {{ 'ok' if r.status == 'ok' else ('warn' if r.status == 'partial' else 'bad') }}">
+          {{ r.status }}
+        </span>
+      </td>
+      <td>{{ r.candidates_found }}</td>
+      <td>{{ r.accounts_new }}</td>
+      <td class="muted">{{ (r.error or "")[:60] }}</td>
+    </tr>
+  {% else %}
+    <tr><td colspan="6" class="empty">No runs yet.</td></tr>
+  {% endfor %}
+  </tbody>
+</table></div>
+
+<h2>Recent alerts</h2>
+<div class="wrap"><table>
+  <thead><tr><th>When</th><th>Type</th><th>Site</th><th>Detail</th></tr></thead>
+  <tbody>
+  {% for a in alerts %}
+    <tr>
+      <td class="muted">{{ a.created_at | age }}</td>
+      <td><span class="pill {{ 'bad' if a.type in ('site_down', 'site_blocked', 'probe_failed') else ('warn' if a.type in ('extractor_broken', 'flow_broken', 'account_disappeared') else 'ok') }}">{{ a.type }}</span></td>
+      <td>{{ sites[a.site_id].slug if a.site_id in sites else "-" }}</td>
+      <td class="muted mono">{{ (a.payload | string)[:80] }}</td>
+    </tr>
+  {% else %}
+    <tr><td colspan="4" class="empty">No alerts.</td></tr>
+  {% endfor %}
+  </tbody>
+</table></div>
+{% endblock %}

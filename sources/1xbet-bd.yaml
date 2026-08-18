@@ -1,0 +1,191 @@
+# Verified end to end against a live logged-in session on 2026-08-18.
+slug: 1xbet-bd
+name: 1xBet Bangladesh
+status: active
+fetcher: browser
+
+urls:
+  # Not the homepage: the deposit UI is behind the green header button.
+  - url: https://bd.1xbet.com/en/office/recharge
+    type: deposit
+    current: true
+
+# Behind a login. Produce this with: python scripts/collect_1xbet.py --login
+auth_state: data/auth/1xbet-bd.json
+
+# The payment panel is a separate app embedded in the account page. The flow clicks and
+# the block selectors all run inside this frame; from the outer document they match nothing.
+frame: /paysystems/deposit
+
+probes:
+  # Each method reveals its payee only while its own modal is open, so each needs its
+  # own visit. The markup differs per method - some print the number in a <b>, others
+  # in .modal-message-address - which is why the selectors live per probe.
+  - name: bkash-bt3
+    flow:
+      - click: '.payment-cell[data-method="bt_bangladesh_default"]'
+        wait_for: ".payment_modal_input--html"
+    wait_for: ".payment_modal_input--html"
+    blocks:
+      - channel: bkash
+        container: ".payment_modal_row"
+        value: ".payment_modal_input--html"
+        holder: ".modal-message-address"
+
+  - name: upay
+    flow:
+      - click: '.payment-cell[data-method="upay_bangla"]'
+        wait_for: ".payment_modal_input--html"
+    wait_for: ".payment_modal_input--html"
+    blocks:
+      - channel: upay
+        container: ".payment_modal_row"
+        value: ".modal-message-address"
+
+  - name: bkash-free
+    flow:
+      - click: '.payment-cell[data-method="bkash_free"]'
+        wait_for: ".payment_modal_input--html"
+    wait_for: ".payment_modal_input--html"
+    blocks:
+      - channel: bkash
+        container: ".payment_modal_body"
+        value: ".modal-message-address"
+
+  - name: nexus-pay
+    flow:
+      - click: '.payment-cell[data-method="internet_banking"]'
+        wait_for: ".payment_modal_input--html"
+    wait_for: ".payment_modal_input--html"
+    blocks:
+      - channel: bank_transfer
+        container: ".payment_modal_body"
+        value: ".modal-message-address"
+        bank_name: "Dutch-Bangla Bank"
+
+  - name: pubali-bank
+    flow:
+      - click: '.payment-cell[data-method="pubali_bank_bdt"]'
+        wait_for: ".payment_modal_input--html"
+    wait_for: ".payment_modal_input--html"
+    blocks:
+      - channel: bank_transfer
+        container: ".payment_modal_row"
+        value: ".payment_modal_input--html"
+        bank_name: "Pubali Bank"
+
+  # Bank Transfer shows nothing until a recipient bank is chosen, and each choice is a
+  # different payee, so the dropdown is walked one option at a time.
+  - name: bt-ab
+    flow:
+      - click: '.payment-cell[data-method="bt_bangla"]'
+        wait_for: ".payment_modal_input--html"
+      - select: 'select[name="bank"]'
+        option: "AB Bank"
+        wait_for: ".modal-message-address"
+    wait_for: ".payment_modal_input--html"
+    blocks:
+      - channel: bank_transfer
+        container: ".payment_modal_body"
+        value: ".modal-message-address"
+        bank_name: "AB Bank"
+
+  - name: bt-dbbl
+    flow:
+      - click: '.payment-cell[data-method="bt_bangla"]'
+        wait_for: ".payment_modal_input--html"
+      - select: 'select[name="bank"]'
+        option: "DBBL BANK"
+        wait_for: ".modal-message-address"
+    wait_for: ".payment_modal_input--html"
+    blocks:
+      - channel: bank_transfer
+        container: ".payment_modal_body"
+        value: ".modal-message-address"
+        bank_name: "Dutch-Bangla Bank"
+
+  - name: bt-ebl
+    flow:
+      - click: '.payment-cell[data-method="bt_bangla"]'
+        wait_for: ".payment_modal_input--html"
+      - select: 'select[name="bank"]'
+        option: "EBL BANK"
+        wait_for: ".modal-message-address"
+    wait_for: ".payment_modal_input--html"
+    blocks:
+      - channel: bank_transfer
+        container: ".payment_modal_body"
+        value: ".modal-message-address"
+        bank_name: "Eastern Bank"
+
+  - name: bt-premier
+    flow:
+      - click: '.payment-cell[data-method="bt_bangla"]'
+        wait_for: ".payment_modal_input--html"
+      - select: 'select[name="bank"]'
+        option: "Premier Bank"
+        wait_for: ".modal-message-address"
+    wait_for: ".payment_modal_input--html"
+    blocks:
+      - channel: bank_transfer
+        container: ".payment_modal_body"
+        value: ".modal-message-address"
+        bank_name: "Premier Bank"
+
+  # paykassma2. Confirming REDIRECTS out to Nagad's own checkout, which names a merchant
+  # but never shows a receiving wallet - so this records a name, not an account. Walking it
+  # raises a real (unpaid) deposit order every run; that is the price of the name.
+  - name: fast-nagad
+    channel: nagad
+    creates_order: true
+    flow:
+      - click: '.payment-cell[data-method="nagad_b_webdef"]'
+        wait_for: "#deposit_button"
+      # No wait_for here: this click navigates out of the iframe entirely, so waiting for
+      # an element of the destination page from inside the frame always times out and
+      # reports a break that did not happen. The probe-level wait below does it properly,
+      # against whatever document we actually land on.
+      - click: "#deposit_button"
+    wait_for: ".merchant-name"
+    merchant: ".merchant-name"
+
+ignore_numbers: []
+
+notes: |
+  Live recon, 2026-08-18.
+
+  Structure: /en/office/recharge embeds an iframe at bd.1xbet.com/paysystems/deposit/
+  carrying an h_token JWT that expires in ~4h, so the frame has to be reached through the
+  account page rather than by saving its URL. 67 methods, 10 marked recommended:
+
+      Fast Nagad          nagad_b_webdef         paykassma2
+      LightSpeed Bkash    bkash_p2p_webdef       paykassma2
+      Bkash               bt_bangladesh_default  bt3
+      Upay                upay_bangla            bt3
+      Bkash Free          bkash_free             bt3
+      Internet Banking    internet_banking       bt3
+      Bank Transfer       bt_bangla              bt3
+      Pubali Bank         pubali_bank_bdt        bt3
+      Tether on Tron      usdttrx                cryptocurrencies2
+      TRON                tron                   cryptocurrencies2
+
+  The two aggregators expose completely different things, which is why only bt3 is
+  configured here:
+
+  bt3 - the receiver is printed in the modal as "<01XXXXXXXXX> <business name>". A number we can
+  store, dedup and alert on. This is the collectable case.
+
+  paykassma2 - pressing Confirm raises a deposit order and redirects out through
+  dazen1.one/pay/bn to Nagad's own checkout at payment.mynagad.com:30000. That page shows
+  a merchant name, an invoice id and an amount, and asks for the PAYER's number. No
+  receiver wallet number exists to collect. The merchant name also rotates per request -
+  observed as RIYA FASHION and LADIES AND BABY SHOP minutes apart - so it identifies a
+  paykassma merchant account, not a stable payee.
+
+  Consequences worth deciding on before this leaves draft:
+    - a paykassma2 payee cannot be represented by the current model, which keys an account
+      on (channel, account_number). Storing it needs a name-only observation type.
+    - walking a paykassma2 method raises a real deposit order each run. Any scheduled
+      collection must stay on the bt3 methods.
+    - the business name sits as a bare text node beside the number rather than in its own
+      element, so `holder` cannot select it and holder_name comes back empty.
