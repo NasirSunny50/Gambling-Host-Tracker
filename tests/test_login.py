@@ -116,3 +116,26 @@ def test_run_site_reports_when_recovery_fails(session, monkeypatch):
     report = runmod.run_site(session, _login_config())
     assert report.status == "failed"
     assert "did not recover" in report.error
+
+
+def test_logged_out_detected_by_login_redirect():
+    """A redirect to the login page means the session is dead, even with no body marker."""
+    from ght.pipeline.run import _looks_logged_out
+    from ght.types import RawCapture
+
+    config = _login_config().model_copy(update={"logged_out_url": "/user/login"})
+
+    on_login = RawCapture(url="https://bd.1xbet.com/en/user/login?return-url=x", status_code=200, html="<form>")
+    assert _looks_logged_out(config, on_login) is True
+
+    on_deposit = RawCapture(url="https://bd.1xbet.com/paysystems/deposit/?x", status_code=200, html="<div>")
+    assert _looks_logged_out(config, on_deposit) is False
+
+
+def test_logged_out_detected_by_body_marker():
+    from ght.pipeline.run import _looks_logged_out
+    from ght.types import RawCapture
+
+    config = _login_config()  # marker "registration-widget"
+    hit = RawCapture(url="https://x/", status_code=200, html="...registration-widget...")
+    assert _looks_logged_out(config, hit) is True

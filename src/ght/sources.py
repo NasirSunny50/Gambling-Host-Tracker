@@ -194,6 +194,10 @@ class SourceConfig(_Strict):
     # has expired, so the run stops fast with a clear message instead of timing out on
     # every probe waiting for a deposit panel that will never load.
     logged_out_marker: str | None = None
+    # Substring of the landed URL that means the session expired — a site that answers a
+    # request for the account page by redirecting to its login page. More reliable than a
+    # body marker, since the login page shares no markup with the deposit page.
+    logged_out_url: str | None = None
     ignore_numbers: list[str] = Field(default_factory=list)
     notes: str | None = None
 

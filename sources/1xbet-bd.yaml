@@ -18,8 +18,10 @@ auth_state: data/auth/1xbet-bd.json
 # site redesigns. Because 1xBet shows a CAPTCHA, this is assisted (see below): a run that
 # finds the session expired opens a visible browser for the operator to sign in.
 login:
-  url: https://bd.1xbet.com/en
-  # The header "Log in" opens the auth form before the fields exist.
+  # The account page redirects here when the session is dead.
+  url: https://bd.1xbet.com/en/user/login
+  # The header "Log in" opens the auth form before the fields exist (harmless if already
+  # on the login page — a missing element is ignored in assisted mode).
   open: '.header-auth__enter, [class*="auth"] button, text=Log in'
   username: "#username"
   password: "#username-password"
@@ -45,6 +47,8 @@ timeout: 90
 
 # Present only when signed out; its appearance means the session must be refreshed.
 logged_out_marker: registration-layout-widget
+# A dead session redirects the account page to /en/user/login.
+logged_out_url: /user/login
 
 probes:
   # Each method reveals its payee only while its own modal is open, so each needs its

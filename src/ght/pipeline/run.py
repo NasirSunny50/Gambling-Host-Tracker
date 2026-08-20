@@ -167,6 +167,21 @@ def _capture_status(capture: RawCapture) -> str:
     return "ok"
 
 
+def _looks_logged_out(config: SourceConfig, capture: RawCapture) -> bool:
+    """Whether a capture shows an expired session rather than the deposit page.
+
+    Two independent signals, either is enough: the fetcher flagged the body as logged out,
+    or the request was redirected to the site's login page. The URL signal matters because
+    a login page shares no markup with the deposit page, so a body marker taken from the
+    logged-out homepage will not match it.
+    """
+    marker = config.logged_out_marker
+    if marker and (capture.flow_error == "LOGGED_OUT" or marker in capture.text):
+        return True
+    url_marker = config.logged_out_url
+    return bool(url_marker and url_marker in (capture.url or ""))
+
+
 def _collect_captures(config: SourceConfig) -> tuple[list, str | None, bool]:
     """Fetch every probe, stopping early if a dead login lands them on the logged-out page.
 
@@ -183,8 +198,7 @@ def _collect_captures(config: SourceConfig) -> tuple[list, str | None, bool]:
         captures.append((probe, probe_config, probe_capture))
         if source_url is None:
             source_url = probe_url
-        marker = config.logged_out_marker
-        if marker and (probe_capture.flow_error == "LOGGED_OUT" or marker in probe_capture.text):
+        if _looks_logged_out(config, probe_capture):
             auth_expired = True
             break
     return captures, source_url, auth_expired
