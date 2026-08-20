@@ -17,6 +17,9 @@ auth_state: data/auth/1xbet-bd.json
 # the block selectors all run inside this frame; from the outer document they match nothing.
 frame: /paysystems/deposit
 
+# The account page loads its payment panel in an iframe that routinely takes >30s.
+timeout: 90
+
 probes:
   # Each method reveals its payee only while its own modal is open, so each needs its
   # own visit. The markup differs per method - some print the number in a <b>, others

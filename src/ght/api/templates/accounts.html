@@ -1,56 +1,52 @@
 {% extends "base.html" %}
+{% import "_macros.html" as ui %}
 {% set page = "accounts" %}
+{% block title %}Accounts — Host Tracker{% endblock %}
 {% block body %}
-<h1>Accounts</h1>
-<p class="sub">{{ rows | length }} account{{ "" if rows | length == 1 else "s" }} matching this filter.</p>
 
-<form class="filters" method="get" action="/accounts">
-  <input type="search" name="q" value="{{ q }}" placeholder="number, holder or bank">
+<div class="head">
+  <h1>Accounts</h1>
+  <div class="actions">
+    <a class="btn" href="/accounts.csv?channel={{ channel or '' }}&status={{ status }}&q={{ q }}">Download CSV</a>
+  </div>
+</div>
+<p class="sub">{{ rows | length }} account{{ "" if rows | length == 1 else "s" }} match this view.</p>
+
+<form class="toolbar" method="get" action="/accounts">
+  <input type="search" name="q" value="{{ q }}" placeholder="Search number, holder or bank">
   <select name="channel">
     <option value="">All channels</option>
     {% for c in channels %}
-      <option value="{{ c }}" {{ "selected" if c == channel }}>{{ c | channel }}</option>
+      <option value="{{ c }}" {{ "selected" if c == channel }}>{{ ui.CHANNEL_LABELS.get(c, c) }}</option>
     {% endfor %}
   </select>
   <select name="status">
-    {% for value, label in [("all", "Any status"), ("active", "Active"), ("inactive", "Gone"), ("review", "Needs review")] %}
+    {% for value, label in [("all","Any status"), ("active","Active"), ("inactive","Gone"), ("review","Needs review")] %}
       <option value="{{ value }}" {{ "selected" if value == status }}>{{ label }}</option>
     {% endfor %}
   </select>
-  <button type="submit">Filter</button>
-  <a class="right" href="/accounts.csv?channel={{ channel or '' }}&status={{ status }}&q={{ q }}">Download CSV</a>
+  <button class="btn-primary" type="submit">Apply</button>
 </form>
 
-<div class="wrap"><table>
-  <thead>
-    <tr>
-      <th>Channel</th><th>Number</th><th>Holder</th><th>Bank</th>
-      <th>Confidence</th><th>Seen</th><th>Last seen</th><th>Status</th>
-    </tr>
-  </thead>
-  <tbody>
+{% if rows %}
+{% call ui.table(["Channel", "Number", "Holder", "Bank", "Confidence", "#Seen", "Last seen", "Status"]) %}
   {% for a in rows %}
-    <tr>
-      <td>{{ a.channel | channel }}</td>
-      <td class="mono"><a href="/accounts/{{ a.id }}">{{ a.account_number }}</a></td>
-      <td>{{ a.holder_name or "-" }}</td>
-      <td>{{ a.bank_name or "-" }}</td>
-      <td>
-        <span class="pill {{ 'ok' if a.confidence >= 0.9 else ('warn' if a.confidence >= 0.6 else 'bad') }}">
-          {{ "%.1f" | format(a.confidence) }}
-        </span>
-      </td>
-      <td>{{ a.observation_count }}&times;</td>
-      <td class="muted">{{ a.last_seen_at | age }}</td>
-      <td>
-        {% if a.needs_review %}<span class="pill warn">review</span>
-        {% elif a.is_active %}<span class="pill ok">active</span>
-        {% else %}<span class="pill">gone</span>{% endif %}
-      </td>
-    </tr>
-  {% else %}
-    <tr><td colspan="8" class="empty">Nothing matches that filter.</td></tr>
+  <tr>
+    <td>{{ ui.channel(a.channel) }}</td>
+    <td>{{ ui.number(a) }}</td>
+    <td>{{ a.holder_name or "—" }}</td>
+    <td>{{ a.bank_name or "—" }}</td>
+    <td>{{ ui.confidence(a.confidence) }}</td>
+    <td class="num dim">{{ a.observation_count }}×</td>
+    <td class="dim">{{ a.last_seen_at | age }}</td>
+    <td>{{ ui.account_state(a) }}</td>
+  </tr>
   {% endfor %}
-  </tbody>
-</table></div>
+{% endcall %}
+{% elif q or channel or status != "all" %}
+<div class="panel">{{ ui.empty("No matches", "Nothing matches this filter. Try clearing the search or widening the status.") }}</div>
+{% else %}
+<div class="panel">{{ ui.empty("No accounts yet", "Run a collection from the Runs page to start pulling payee details.") }}</div>
+{% endif %}
+
 {% endblock %}

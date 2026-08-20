@@ -82,6 +82,9 @@ def _age(value: datetime | None) -> str:
 
 templates.env.filters["age"] = _age
 templates.env.filters["channel"] = lambda value: CHANNEL_LABELS.get(value, value)
+# The base layout shows a live "collecting…" flag on every page, so the manager is a
+# template global rather than something each route has to remember to pass.
+templates.env.globals["job"] = manager
 
 
 @router.get("/", response_class=HTMLResponse)
@@ -248,9 +251,11 @@ def runs(request: Request, session: Session = Depends(get_session)):
             "sites": sites,
             "evidence_counts": counts,
             "runnable": _runnable_sites(),
-            "job": manager.current,
             "job_running": manager.is_running,
             "job_log": manager.log_tail,
+            # While a run is in flight the page reloads itself so progress is visible
+            # without the analyst hammering refresh.
+            "auto_refresh": manager.is_running,
         },
     )
 

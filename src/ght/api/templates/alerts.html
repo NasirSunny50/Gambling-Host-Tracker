@@ -1,33 +1,30 @@
 {% extends "base.html" %}
+{% import "_macros.html" as ui %}
 {% set page = "alerts" %}
+{% block title %}Alerts — Host Tracker{% endblock %}
 {% block body %}
-<h1>Alerts</h1>
+
+<div class="head"><h1>Alerts</h1></div>
 <p class="sub">New payees, payees that stopped appearing, and collection problems.</p>
 
-<div class="wrap"><table>
-  <thead><tr><th>When</th><th>Type</th><th>Site</th><th>Account</th><th>Payload</th><th>Delivered</th></tr></thead>
-  <tbody>
+{% call ui.table(["When", "Type", "Site", "Account", "Detail", "Delivered"]) %}
   {% for a in rows %}
-    {% set account_id = a.payload.get("account_id") if a.payload else None %}
-    <tr>
-      <td class="muted">{{ a.created_at | age }}</td>
-      <td>
-        <span class="pill {{ 'bad' if a.type in ('site_down', 'site_blocked', 'probe_failed') else ('warn' if a.type in ('extractor_broken', 'flow_broken', 'account_disappeared') else 'ok') }}">
-          {{ a.type }}
-        </span>
-      </td>
-      <td>{{ sites[a.site_id].slug if a.site_id in sites else "-" }}</td>
-      <td class="mono">
-        {% if account_id and account_id in accounts %}
-          <a href="/accounts/{{ account_id }}">{{ accounts[account_id].account_number }}</a>
-        {% else %}-{% endif %}
-      </td>
-      <td class="muted mono">{{ (a.payload | string)[:90] }}</td>
-      <td class="muted">{{ a.delivered_at | age if a.delivered_at else "pending" }}</td>
-    </tr>
+  {% set account_id = a.payload.get("account_id") if a.payload else None %}
+  <tr>
+    <td class="dim">{{ a.created_at | age }}</td>
+    <td>{{ ui.alert_tag(a.type) }}</td>
+    <td>{{ sites[a.site_id].slug if a.site_id in sites else "—" }}</td>
+    <td>
+      {% if account_id and account_id in accounts %}
+        {{ ui.number(accounts[account_id]) }}
+      {% else %}—{% endif %}
+    </td>
+    <td class="dim mono">{{ (a.payload | string)[:90] }}</td>
+    <td>{{ ui.tag("delivered", "ok") if a.delivered_at else ui.tag("pending", "neutral") }}</td>
+  </tr>
   {% else %}
-    <tr><td colspan="6" class="empty">No alerts.</td></tr>
+  <tr><td colspan="6">{{ ui.empty("No alerts", "When a new payee appears, an old one goes quiet, or a collection breaks, it shows up here.") }}</td></tr>
   {% endfor %}
-  </tbody>
-</table></div>
+{% endcall %}
+
 {% endblock %}

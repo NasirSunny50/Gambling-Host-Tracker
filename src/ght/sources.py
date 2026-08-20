@@ -157,6 +157,11 @@ class SourceConfig(_Strict):
     # a separate app embedded in the account page, and neither the flow clicks nor the
     # selectors reach into it from the top-level document.
     frame: str | None = None
+    # Per-page timeout in seconds for the browser fetcher. A heavy account page that loads
+    # its payment panel in an iframe can take well over the default; keeping this in config
+    # means the site collects the same from the CLI, the script, or the portal, instead of
+    # depending on an environment variable someone has to remember to set.
+    timeout: int | None = None
     # Per-method probes. A source uses either these or the single flow/blocks pair above.
     probes: list[Probe] = Field(default_factory=list)
     ignore_numbers: list[str] = Field(default_factory=list)

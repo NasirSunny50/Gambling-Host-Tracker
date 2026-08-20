@@ -82,13 +82,16 @@ def _fetcher_kwargs(config: SourceConfig) -> dict:
     """Browser-only options from the site config. The HTTP fetcher takes none of these."""
     if config.fetcher != "browser":
         return {}
-    return {
+    kwargs = {
         "flow": config.flow,
         "wait_for": config.wait_for,
         "auth_state": config.auth_state,
         "channel": config.browser_channel,
         "frame": config.frame,
     }
+    if config.timeout is not None:
+        kwargs["timeout"] = config.timeout
+    return kwargs
 
 
 def fetch_first_working_url(config: SourceConfig) -> tuple[RawCapture, str | None]:

@@ -1,86 +1,81 @@
 {% extends "base.html" %}
+{% import "_macros.html" as ui %}
 {% set page = "dashboard" %}
+{% block title %}Overview — Host Tracker{% endblock %}
 {% block body %}
-<h1>Overview</h1>
-<p class="sub">Payment accounts collected from the configured deposit pages.</p>
 
-<div class="cards">
-  <div class="card"><div class="n">{{ totals.active }}</div><div class="k">Active accounts</div></div>
-  <div class="card"><div class="n">{{ totals.accounts }}</div><div class="k">Total ever seen</div></div>
-  <div class="card"><div class="n">{{ totals.review }}</div><div class="k">Needs review</div></div>
-  <div class="card"><div class="n">{{ totals.sites }}</div><div class="k">Sites tracked</div></div>
+<div class="head">
+  <h1>Overview</h1>
+  <div class="actions"><a class="btn" href="/runs">Run a collection</a></div>
+</div>
+<p class="sub">Payment accounts advertised on the deposit pages we track.</p>
+
+<div class="stat-grid">
+  {{ ui.stat(totals.active, "Active accounts", href="/accounts?status=active", tone="accent") }}
+  {{ ui.stat(totals.accounts, "Seen all-time", href="/accounts") }}
+  {{ ui.stat(totals.review, "Needs review", href="/accounts?status=review", tone="warn" if totals.review else "") }}
+  {{ ui.stat(totals.sites, "Sites tracked", href="/runs") }}
 </div>
 
-<h2>Active by channel</h2>
+{{ ui.section("Active accounts by channel") }}
 {% if by_channel %}
-<div class="wrap"><table>
-  <thead><tr><th>Channel</th><th>Accounts</th></tr></thead>
-  <tbody>
+{% call ui.table(["Channel", "#Active"]) %}
   {% for channel, count in by_channel %}
-    <tr>
-      <td><a href="/accounts?channel={{ channel }}&status=active">{{ channel | channel }}</a></td>
-      <td>{{ count }}</td>
-    </tr>
+  <tr>
+    <td><a href="/accounts?channel={{ channel }}&status=active" style="text-decoration:none">{{ ui.channel(channel) }}</a></td>
+    <td class="num">{{ count }}</td>
+  </tr>
   {% endfor %}
-  </tbody>
-</table></div>
-{% else %}<div class="wrap"><div class="empty">Nothing collected yet.</div></div>{% endif %}
+{% endcall %}
+{% else %}
+<div class="panel">{{ ui.empty("Nothing collected yet", "Run a collection from the Runs page to pull payee details from the configured deposit pages.") }}</div>
+{% endif %}
 
-<h2>Newest accounts</h2>
+{{ ui.section("Newest accounts") }}
 {% if newest %}
-<div class="wrap"><table>
-  <thead><tr><th>Channel</th><th>Number</th><th>Holder</th><th>Bank</th><th>First seen</th></tr></thead>
-  <tbody>
+{% call ui.table(["Channel", "Number", "Holder", "Bank", "First seen"]) %}
   {% for a in newest %}
-    <tr>
-      <td>{{ a.channel | channel }}</td>
-      <td class="mono"><a href="/accounts/{{ a.id }}">{{ a.account_number }}</a></td>
-      <td>{{ a.holder_name or "-" }}</td>
-      <td>{{ a.bank_name or "-" }}</td>
-      <td class="muted">{{ a.first_seen_at | age }}</td>
-    </tr>
+  <tr>
+    <td>{{ ui.channel(a.channel) }}</td>
+    <td>{{ ui.number(a) }}</td>
+    <td>{{ a.holder_name or "—" }}</td>
+    <td>{{ a.bank_name or "—" }}</td>
+    <td class="dim">{{ a.first_seen_at | age }}</td>
+  </tr>
   {% endfor %}
-  </tbody>
-</table></div>
-{% else %}<div class="wrap"><div class="empty">Nothing collected yet.</div></div>{% endif %}
+{% endcall %}
+{% else %}
+<div class="panel">{{ ui.empty("No accounts yet") }}</div>
+{% endif %}
 
-<h2>Recent runs</h2>
-<div class="wrap"><table>
-  <thead><tr><th>Started</th><th>Site</th><th>Status</th><th>Candidates</th><th>New</th><th>Error</th></tr></thead>
-  <tbody>
+{{ ui.section("Recent runs") }}
+{% call ui.table(["Started", "Site", "Status", "#Candidates", "#New", "Note"]) %}
   {% for r in runs %}
-    <tr>
-      <td class="muted">{{ r.started_at | age }}</td>
-      <td>{{ sites[r.site_id].slug if r.site_id in sites else r.site_id }}</td>
-      <td>
-        <span class="pill {{ 'ok' if r.status == 'ok' else ('warn' if r.status == 'partial' else 'bad') }}">
-          {{ r.status }}
-        </span>
-      </td>
-      <td>{{ r.candidates_found }}</td>
-      <td>{{ r.accounts_new }}</td>
-      <td class="muted">{{ (r.error or "")[:60] }}</td>
-    </tr>
+  <tr>
+    <td class="dim">{{ r.started_at | age }}</td>
+    <td>{{ sites[r.site_id].slug if r.site_id in sites else r.site_id }}</td>
+    <td>{{ ui.tag(r.status, "ok" if r.status == "ok" else ("warn" if r.status == "partial" else "bad")) }}</td>
+    <td class="num">{{ r.candidates_found }}</td>
+    <td class="num">{{ r.accounts_new }}</td>
+    <td class="dim">{{ (r.error or "—")[:60] }}</td>
+  </tr>
   {% else %}
-    <tr><td colspan="6" class="empty">No runs yet.</td></tr>
+  <tr><td colspan="6">{{ ui.empty("No runs recorded yet") }}</td></tr>
   {% endfor %}
-  </tbody>
-</table></div>
+{% endcall %}
 
-<h2>Recent alerts</h2>
-<div class="wrap"><table>
-  <thead><tr><th>When</th><th>Type</th><th>Site</th><th>Detail</th></tr></thead>
-  <tbody>
+{{ ui.section("Recent alerts") }}
+{% call ui.table(["When", "Type", "Site", "Detail"]) %}
   {% for a in alerts %}
-    <tr>
-      <td class="muted">{{ a.created_at | age }}</td>
-      <td><span class="pill {{ 'bad' if a.type in ('site_down', 'site_blocked', 'probe_failed') else ('warn' if a.type in ('extractor_broken', 'flow_broken', 'account_disappeared') else 'ok') }}">{{ a.type }}</span></td>
-      <td>{{ sites[a.site_id].slug if a.site_id in sites else "-" }}</td>
-      <td class="muted mono">{{ (a.payload | string)[:80] }}</td>
-    </tr>
+  <tr>
+    <td class="dim">{{ a.created_at | age }}</td>
+    <td>{{ ui.alert_tag(a.type) }}</td>
+    <td>{{ sites[a.site_id].slug if a.site_id in sites else "—" }}</td>
+    <td class="dim mono">{{ (a.payload | string)[:80] }}</td>
+  </tr>
   {% else %}
-    <tr><td colspan="4" class="empty">No alerts.</td></tr>
+  <tr><td colspan="4">{{ ui.empty("No alerts", "New payees, payees that stop appearing, and collection problems will show up here.") }}</td></tr>
   {% endfor %}
-  </tbody>
-</table></div>
+{% endcall %}
+
 {% endblock %}

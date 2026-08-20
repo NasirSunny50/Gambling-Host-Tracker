@@ -1,0 +1,66 @@
+{# Reusable building blocks. Imported as `ui` so a page reads ui.tag(...), ui.table(...). #}
+
+{% set CHANNEL_LABELS = {
+  "bkash":"bKash", "nagad":"Nagad", "rocket":"Rocket", "upay":"Upay",
+  "tap":"Tap", "mcash":"mCash", "bank_transfer":"Bank transfer"
+} %}
+
+{% macro channel(value) -%}
+<span class="badge ch-{{ value }}">{{ CHANNEL_LABELS.get(value, value) }}</span>
+{%- endmacro %}
+
+{% macro tag(text, kind="neutral") -%}
+<span class="tag tag-{{ kind }}">{{ text }}</span>
+{%- endmacro %}
+
+{% macro confidence(value) -%}
+{% set k = "ok" if value >= 0.9 else ("warn" if value >= 0.6 else "bad") -%}
+<span class="tag tag-{{ k }}" title="Extraction confidence">{{ "%.0f%%" | format(value * 100) }}</span>
+{%- endmacro %}
+
+{% macro account_state(a) -%}
+{% if a.needs_review %}{{ tag("Needs review", "warn") }}
+{%- elif a.is_active %}{{ tag("Active", "ok") }}
+{%- else %}{{ tag("Gone", "neutral") }}{% endif %}
+{%- endmacro %}
+
+{% macro alert_tag(kind) -%}
+{% set bad = ["site_down", "site_blocked", "probe_failed"] -%}
+{% set warn = ["extractor_broken", "flow_broken", "account_disappeared"] -%}
+{% set k = "bad" if kind in bad else ("warn" if kind in warn else "ok") -%}
+{{ tag(kind | replace("_", " "), k) }}
+{%- endmacro %}
+
+{# An account number: monospace, links to its detail page, with a copy button. #}
+{% macro number(a) -%}
+<span class="num-cell">
+  <a class="mono" href="/accounts/{{ a.id }}">{{ a.account_number }}</a>
+  <button class="copy" title="Copy" onclick="copyText(this, '{{ a.account_number }}')">⧉</button>
+</span>
+{%- endmacro %}
+
+{% macro stat(n, label, href=None, tone="") -%}
+{% if href %}<a class="stat {{ tone }}" href="{{ href }}">{% else %}<div class="stat {{ tone }}">{% endif %}
+  <div class="stat-n">{{ n }}</div>
+  <div class="stat-k">{{ label }}</div>
+{% if href %}</a>{% else %}</div>{% endif %}
+{%- endmacro %}
+
+{% macro section(title, count=None) -%}
+<div class="section"><h2>{{ title }}</h2>{% if count is not none %}<span class="count">{{ count }}</span>{% endif %}</div>
+{%- endmacro %}
+
+{% macro empty(title, body="") -%}
+<div class="empty"><div class="empty-title">{{ title }}</div>{% if body %}<div class="empty-body">{{ body }}</div>{% endif %}</div>
+{%- endmacro %}
+
+{# Table shell. Pass headers; a header starting with "#" is right-aligned numeric. The
+   caller renders the <tr> rows, so the empty case lives with the data that knows its span. #}
+{% macro table(headers) -%}
+<div class="table-wrap"><table>
+  <thead><tr>
+  {%- for h in headers %}<th class="{{ 'num' if h.startswith('#') }}">{{ h.lstrip('#') }}</th>{% endfor -%}
+  </tr></thead>
+  <tbody>{{ caller() }}</tbody>
+</table></div>
+{%- endmacro %}
