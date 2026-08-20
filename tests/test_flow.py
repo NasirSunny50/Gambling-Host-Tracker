@@ -456,3 +456,43 @@ def test_target_still_finds_the_frame_when_logged_in():
     target, error = fetcher._target(LoggedInPage())
     assert error is None
     assert target.url.endswith("h_token=x")
+
+
+# ------------------------------------------------------- dropdown options that moved
+
+
+class SelectPage(FakePage):
+    """A page whose <select> offers a fixed set of option labels."""
+
+    def __init__(self, labels):
+        super().__init__()
+        self.labels = labels
+        self.selected = []
+
+    def eval_on_selector(self, selector, script):
+        return self.labels
+
+    def select_option(self, selector, label=None, force=False, timeout=None):
+        self.selected.append(label)
+
+
+def test_a_dropdown_option_that_no_longer_exists_fails_fast_and_names_the_options():
+    """A site quietly changing its bank list should cost a config line, not a 90s timeout."""
+    fetcher = BrowserFetcher(
+        flow=[Step(select='select[name="bank"]', option="AB Bank", wait_for=".x")]
+    )
+    page = SelectPage(["Select recipient's bank", "IFIC", "Islami Bank Bangladesh Limited"])
+    error = fetcher._walk(page)
+
+    assert error is not None
+    assert "AB Bank" in error
+    # The message has to carry what the dropdown *does* offer, or the fix is another visit.
+    assert "IFIC" in error
+    assert page.selected == []  # nothing was chosen
+
+
+def test_a_present_option_is_selected():
+    fetcher = BrowserFetcher(flow=[Step(select="#bank", option="IFIC", wait_for=".x")])
+    page = SelectPage(["IFIC", "Other Bank"])
+    assert fetcher._walk(page) is None
+    assert page.selected == ["IFIC"]

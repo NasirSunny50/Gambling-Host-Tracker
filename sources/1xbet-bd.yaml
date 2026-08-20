@@ -10,8 +10,8 @@ urls:
     type: deposit
     current: true
 
-# Behind a login. The session is refreshed either by hand (scripts/collect_1xbet.py --login)
-# or automatically during a run using the login block below.
+# Behind a login. A run signs in first, using the login block below, and writes the
+# session here for the collection that follows.
 auth_state: data/auth/1xbet-bd.json
 
 # Sign-in. Selectors are from the observed login form; verify against a live page if the
@@ -96,39 +96,16 @@ probes:
         value: ".modal-message-address"
         bank_name: "Dutch-Bangla Bank"
 
-  - name: pubali-bank
-    flow:
-      - click: '.payment-cell[data-method="pubali_bank_bdt"]'
-        wait_for: ".payment_modal_input--html"
-    wait_for: ".payment_modal_input--html"
-    blocks:
-      - channel: bank_transfer
-        container: ".payment_modal_row"
-        value: ".payment_modal_input--html"
-        bank_name: "Pubali Bank"
-
   # Bank Transfer shows nothing until a recipient bank is chosen, and each choice is a
-  # different payee, so the dropdown is walked one option at a time.
-  - name: bt-ab
-    flow:
-      - click: '.payment-cell[data-method="bt_bangla"]'
-        wait_for: ".payment_modal_input--html"
-      - select: 'select[name="bank"]'
-        option: "AB Bank"
-        wait_for: ".modal-message-address"
-    wait_for: ".payment_modal_input--html"
-    blocks:
-      - channel: bank_transfer
-        container: ".payment_modal_body"
-        value: ".modal-message-address"
-        bank_name: "AB Bank"
-
+  # different payee, so the dropdown is walked one option at a time. The option text must
+  # match the site exactly; when the site changes its list, the run says so and names the
+  # options it found instead of timing out.
   - name: bt-dbbl
     flow:
       - click: '.payment-cell[data-method="bt_bangla"]'
         wait_for: ".payment_modal_input--html"
       - select: 'select[name="bank"]'
-        option: "DBBL BANK"
+        option: "Dutch-Bangla Bank Limited"
         wait_for: ".modal-message-address"
     wait_for: ".payment_modal_input--html"
     blocks:
@@ -137,33 +114,33 @@ probes:
         value: ".modal-message-address"
         bank_name: "Dutch-Bangla Bank"
 
-  - name: bt-ebl
+  - name: bt-ific
     flow:
       - click: '.payment-cell[data-method="bt_bangla"]'
         wait_for: ".payment_modal_input--html"
       - select: 'select[name="bank"]'
-        option: "EBL BANK"
+        option: "IFIC"
         wait_for: ".modal-message-address"
     wait_for: ".payment_modal_input--html"
     blocks:
       - channel: bank_transfer
         container: ".payment_modal_body"
         value: ".modal-message-address"
-        bank_name: "Eastern Bank"
+        bank_name: "IFIC Bank"
 
-  - name: bt-premier
+  - name: bt-islami
     flow:
       - click: '.payment-cell[data-method="bt_bangla"]'
         wait_for: ".payment_modal_input--html"
       - select: 'select[name="bank"]'
-        option: "Premier Bank"
+        option: "Islami Bank Bangladesh Limited"
         wait_for: ".modal-message-address"
     wait_for: ".payment_modal_input--html"
     blocks:
       - channel: bank_transfer
         container: ".payment_modal_body"
         value: ".modal-message-address"
-        bank_name: "Premier Bank"
+        bank_name: "Islami Bank Bangladesh"
 
   # paykassma2. Confirming REDIRECTS out to Nagad's own checkout, which names a merchant
   # but never shows a receiving wallet - so this records a name, not an account. Walking it
@@ -185,7 +162,7 @@ probes:
 ignore_numbers: []
 
 notes: |
-  Live recon, 2026-08-18.
+  Live recon 2026-08-18, bank list re-checked 2026-08-20.
 
   Structure: /en/office/recharge embeds an iframe at bd.1xbet.com/paysystems/deposit/
   carrying an h_token JWT that expires in ~4h, so the frame has to be reached through the
@@ -198,7 +175,6 @@ notes: |
       Bkash Free          bkash_free             bt3
       Internet Banking    internet_banking       bt3
       Bank Transfer       bt_bangla              bt3
-      Pubali Bank         pubali_bank_bdt        bt3
       Tether on Tron      usdttrx                cryptocurrencies2
       TRON                tron                   cryptocurrencies2
 
@@ -222,3 +198,9 @@ notes: |
       collection must stay on the bt3 methods.
     - the business name sits as a bare text node beside the number rather than in its own
       element, so `holder` cannot select it and holder_name comes back empty.
+
+  2026-08-20: the site changed under us, which is what the partial run was reporting.
+  `pubali_bank_bdt` is gone entirely, and the Bank Transfer dropdown now offers
+  Dutch-Bangla Bank Limited / IFIC / Islami Bank Bangladesh Limited in place of
+  AB Bank / DBBL BANK / EBL BANK / Premier Bank. Those option labels are the site's own
+  wording and will drift again; a mismatch now fails fast and names the current options.

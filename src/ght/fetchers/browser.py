@@ -125,7 +125,15 @@ class BrowserFetcher:
             try:
                 page.wait_for_selector(step.target, timeout=self.timeout)
                 if step.select:
-                    page.select_option(step.select, label=step.option, timeout=self.timeout)
+                    missing = self._missing_option(page, step)
+                    if missing is not None:
+                        return f"flow step {index}: {missing}"
+                    # force=True because these dropdowns are Select2 widgets: the real
+                    # <select> is a 1x1 accessibility shim behind a styled replacement, and
+                    # the usual actionability checks never pass on it.
+                    page.select_option(
+                        step.select, label=step.option, force=True, timeout=self.timeout
+                    )
                 else:
                     page.click(step.click, timeout=self.timeout)
                 if step.wait_for:
@@ -137,6 +145,26 @@ class BrowserFetcher:
                     continue
                 return f"flow step {index} ({step.target!r}) failed: {type(exc).__name__}: {exc}"
         return None
+
+    def _missing_option(self, page, step) -> str | None:
+        """Report a dropdown that no longer offers the configured option.
+
+        Without this the run waits the full timeout for an option that will never appear —
+        a site quietly changing its list of recipient banks costs ninety seconds per probe
+        and reports only "timeout". Naming what the dropdown *does* offer turns that into a
+        one-line config fix.
+        """
+        try:
+            labels = page.eval_on_selector(
+                step.select,
+                "el => Array.from(el.options).map(o => o.text.trim())",
+            )
+        except Exception:  # noqa: BLE001 - not a <select> we can read; let Playwright try
+            return None
+        if step.option in labels:
+            return None
+        offered = ", ".join(repr(label) for label in labels) or "nothing"
+        return f"{step.select!r} has no option {step.option!r}; it offers {offered}"
 
     def _launch(self, playwright):
         """Return a browser, trying each channel until one starts.
