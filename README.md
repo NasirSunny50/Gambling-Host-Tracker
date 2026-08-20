@@ -8,10 +8,24 @@ keeps **every sighting** rather than the current value. What you get back is a t
 which account was advertised, on which site, at which time, with the page it came from
 stored and hashed as evidence.
 
-> **Scope.** Only publicly visible pages are read. The system never creates an account,
-> never logs in, and never initiates a payment. Collected data includes account holder
-> names and numbers — treat it under the organisation's existing PII and AML retention
-> policy.
+> **Scope.** The system never creates an account and never completes a payment. Some
+> deposit pages sit behind a login, so it can reuse a session a human captured by hand (no
+> credentials are stored), and reaching a few payees requires confirming a deposit, which
+> *initiates* a request the operator shows but which is never paid. Collected data includes
+> account holder names and numbers — treat it under the organisation's existing PII and AML
+> retention policy.
+
+## Quick start (Windows)
+
+Double-click, in order:
+
+1. **`Before Start.bat`** — opens a browser so you sign in yourself, then saves the session.
+   Run it again whenever a collection starts coming back empty (the session has expired).
+2. **`Start.bat`** — launches the portal at `http://127.0.0.1:8000` and opens it in your
+   browser. Trigger collections from the **Runs** page; keep the window open while you work.
+
+The first run of either sets up the environment automatically. Everything below is the
+manual equivalent for other platforms.
 
 ## Setup
 
