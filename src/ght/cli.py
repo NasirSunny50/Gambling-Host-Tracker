@@ -245,6 +245,19 @@ def status(limit: int = typer.Option(15, "--limit", "-n")) -> None:
         console.print(table)
 
 
+@app.command("gen-key")
+def gen_key() -> None:
+    """Print a fresh encryption key for GHT_SECRET_KEY (used to store site credentials)."""
+    from ght.crypto import generate_key
+
+    key = generate_key()
+    console.print(key)
+    console.print(
+        "\n[dim]Put this in the GHT_SECRET_KEY environment variable (or .env). "
+        "Keep it safe and back it up: without it, stored credentials cannot be read.[/dim]"
+    )
+
+
 @app.command("serve")
 def serve(
     host: str = typer.Option("127.0.0.1", "--host", help="Bind address."),

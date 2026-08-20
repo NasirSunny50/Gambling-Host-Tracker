@@ -136,6 +136,25 @@ class Probe(_Strict):
     creates_order: bool = False
 
 
+class Login(_Strict):
+    """How to sign in to a site headlessly, with stored credentials.
+
+    Selectors only — the credentials themselves live encrypted in the database, never in
+    config. The flow is: optionally click ``open`` to reveal the form, fill ``username`` and
+    ``password``, click ``submit``, then wait for ``success`` to prove we are in. If any
+    ``challenge`` selector appears instead, login aborts: a CAPTCHA or 2FA prompt cannot be
+    solved automatically, and the operator is told to capture the session by hand.
+    """
+
+    url: str
+    username: str
+    password: str
+    submit: str
+    success: str
+    open: str | None = None
+    challenge: list[str] = Field(default_factory=list)
+
+
 class SourceConfig(_Strict):
     slug: str
     name: str
@@ -148,8 +167,12 @@ class SourceConfig(_Strict):
     # Selector that marks the final page as ready, checked after the flow finishes.
     wait_for: str | None = None
     # Path to a Playwright storage_state JSON for sites whose deposit page needs a login.
-    # The file is produced by a human signing in themselves; no credentials live in config.
+    # Produced either by a human signing in (scripts/collect_1xbet.py --login) or by the
+    # automated login below; no credentials live in config either way.
     auth_state: str | None = None
+    # How to sign in automatically with stored credentials. Optional: without it, the only
+    # way to refresh the session is the hand-captured route.
+    login: Login | None = None
     # Force a specific browser for the browser fetcher (msedge / chrome). Left unset, the
     # fetcher tries the bundled Chromium first and falls back to installed browsers.
     browser_channel: str | None = None

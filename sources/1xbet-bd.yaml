@@ -10,8 +10,26 @@ urls:
     type: deposit
     current: true
 
-# Behind a login. Produce this with: python scripts/collect_1xbet.py --login
+# Behind a login. Refresh the session either by hand (scripts/collect_1xbet.py --login)
+# or from the portal's Sites page, which uses the login block below with stored credentials.
 auth_state: data/auth/1xbet-bd.json
+
+# Automated sign-in. Selectors are from the observed login form; verify against a live
+# page if the site redesigns. If a CAPTCHA/2FA appears (challenge below), login aborts and
+# asks for a hand-captured session instead — bot walls are not solved automatically.
+login:
+  url: https://bd.1xbet.com/en
+  # The header "Log in" opens the auth form before the fields exist.
+  open: '.header-auth__enter, [class*="auth"] button, text=Log in'
+  username: "#username"
+  password: "#username-password"
+  submit: 'button:has-text("Log in"), .auth-button'
+  # Proof we are in: the deposit button only renders for a logged-in user.
+  success: '.user-control-dashboard-payment, a[href*="/office/recharge"]'
+  challenge:
+    - 'iframe[src*="captcha"]'
+    - 'iframe[src*="challenge"]'
+    - 'text=/verification|captcha|not a robot/i'
 
 # The payment panel is a separate app embedded in the account page. The flow clicks and
 # the block selectors all run inside this frame; from the outer document they match nothing.

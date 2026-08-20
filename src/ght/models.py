@@ -275,3 +275,24 @@ class AccessLog(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, index=True
     )
+
+
+class SiteCredential(Base):
+    """A betting site's login, stored encrypted for automated headless sign-in.
+
+    The username and password are Fernet ciphertext (see ght.crypto); this table never
+    holds either in plaintext. ``label`` is an operator's own non-secret note ("main
+    account") shown in the portal so a login can be recognised without revealing it. Keyed
+    by site slug so a credential can exist before the site has ever been collected.
+    """
+
+    __tablename__ = "site_credentials"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    slug: Mapped[str] = mapped_column(String(80), unique=True, index=True)
+    label: Mapped[str | None] = mapped_column(String(120))
+    username_enc: Mapped[str] = mapped_column(Text)
+    password_enc: Mapped[str] = mapped_column(Text)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )

@@ -102,10 +102,31 @@ request on the operator — no funds move — and the portal names those probes 
 
 ## Portal
 
-`ght serve` starts a read-only, server-rendered portal (dashboard, searchable accounts,
-per-account evidence trail, runs, alerts, merchant sightings) with a CSV export. Collection
-stays a deliberate action: the Runs page can launch a collection in the background, one at a
-time, and every search, export and run is written to `access_log`.
+`ght serve` starts a server-rendered portal (dashboard, searchable accounts, per-account
+evidence trail, runs, alerts, merchant sightings) with a CSV export. The Runs page can
+launch a collection in the background, one at a time, and every search, export, run and
+login is written to `access_log`.
+
+## Credentials & automated login
+
+The **Sites** page stores each site's login and can sign in headlessly to refresh its
+session, so collection doesn't depend on a hand-captured session.
+
+- Credentials are encrypted at rest with a Fernet key from `GHT_SECRET_KEY` — generate one
+  with `ght gen-key`. **Fails closed:** with no key, credentials can't be stored or read;
+  they're never kept in plaintext. Back the key up — losing it makes stored logins
+  unreadable. Passwords are never rendered back to the page or written to a log.
+- Each site needs a `login:` block in its source config (form selectors + a success marker).
+  The **Log in** button fills the stored credentials and saves the session the collector
+  reuses.
+- **CAPTCHA / 2FA is not solved.** If a challenge appears, login aborts and raises a
+  `login_challenge` alert; refresh that site's session by hand instead
+  (`scripts/collect_1xbet.py --login`).
+
+> **Before production.** The portal has no authentication and binds to loopback
+> (`127.0.0.1`) on purpose. Once it stores credentials and can trigger logins, it must sit
+> behind an authenticating reverse proxy (or equivalent) before it is exposed beyond
+> localhost — do not bind it to `0.0.0.0` without that in place.
 
 ## How it holds up when a site changes
 

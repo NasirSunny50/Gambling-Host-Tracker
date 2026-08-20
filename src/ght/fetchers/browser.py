@@ -73,6 +73,8 @@ class BrowserFetcher:
         # Filled in from the session file: the browser identity that created the session.
         self._session_user_agent: str | None = None
         self._session_channel: str | None = None
+        # The browser channel the last _launch actually used (None = bundled Chromium).
+        self._used_channel: str | None = None
         # URL substring of the iframe to work inside, when the deposit UI is embedded.
         self.frame = frame
         # Substring that only appears while logged out, used to fail fast on a dead session.
@@ -149,7 +151,11 @@ class BrowserFetcher:
         for candidate in channels:
             try:
                 kwargs = {"channel": candidate} if candidate else {}
-                return playwright.chromium.launch(headless=True, **kwargs)
+                browser = playwright.chromium.launch(headless=True, **kwargs)
+                # Remember which browser actually started, so a session saved from this
+                # launch can be pinned to it on replay.
+                self._used_channel = candidate
+                return browser
             except Exception as exc:  # noqa: BLE001 - trying the next browser is the point
                 label = candidate or "bundled chromium"
                 failures.append(f"{label} ({str(exc).splitlines()[0]})")

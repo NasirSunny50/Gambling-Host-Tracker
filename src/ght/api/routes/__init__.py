@@ -10,6 +10,7 @@ from __future__ import annotations
 import csv
 import io
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
@@ -17,8 +18,11 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from ght import credentials as creds
+from ght import crypto
 from ght.api import TEMPLATES_DIR
-from ght.api.jobs import manager
+from ght.api.jobs import login_manager, manager
+from ght.config import REPO_ROOT as REPO_ROOT_FALLBACK
 from ght.db import SessionLocal
 from ght.models import (
     AccessLog,
@@ -364,3 +368,85 @@ def accounts_csv(
         media_type="text/csv",
         headers={"Content-Disposition": f'attachment; filename="accounts-{stamp}.csv"'},
     )
+
+
+def _session_age_hours(auth_state: str | None) -> float | None:
+    """Age of a saved session file in hours, or None if the site has none yet."""
+    if not auth_state:
+        return None
+    path = Path(auth_state)
+    if not path.is_absolute():
+        path = REPO_ROOT_FALLBACK / path
+    if not path.exists():
+        return None
+    mtime = datetime.fromtimestamp(path.stat().st_mtime, tz=UTC)
+    return (datetime.now(UTC) - mtime).total_seconds() / 3600
+
+
+def _site_rows(session: Session) -> list[dict]:
+    """Per-site view for the credentials page: what is stored, and how sign-in stands."""
+    configs, _ = scan_sources()
+    rows = []
+    for config in configs:
+        cred = creds.status(session, config.slug)
+        job = login_manager.status(config.slug)
+        rows.append(
+            {
+                "slug": config.slug,
+                "name": config.name,
+                "has_login": config.login is not None,
+                "cred": cred,
+                "session_age": _session_age_hours(config.auth_state),
+                "login_job": job,
+            }
+        )
+    return rows
+
+
+@router.get("/sites", response_class=HTMLResponse)
+def sites(request: Request, session: Session = Depends(get_session)):
+    return templates.TemplateResponse(
+        request,
+        "sites.html",
+        {"rows": _site_rows(session), "key_ready": crypto.is_configured()},
+    )
+
+
+@router.post("/sites/{slug}/credentials")
+def set_site_credentials(
+    slug: str,
+    request: Request,
+    username: str = Form(...),
+    password: str = Form(...),
+    label: str = Form(""),
+    session: Session = Depends(get_session),
+):
+    """Store an encrypted login. The values are never echoed back or logged."""
+    known = {c.slug for c in scan_sources()[0]}
+    if slug not in known or not crypto.is_configured():
+        return RedirectResponse("/sites", status_code=303)
+    creds.set_credentials(session, slug, username.strip(), password, label.strip() or None)
+    session.commit()
+    # Log the act, never the secret.
+    _log(session, request, "set_credentials", {"slug": slug}, None)
+    return RedirectResponse("/sites", status_code=303)
+
+
+@router.post("/sites/{slug}/credentials/delete")
+def delete_site_credentials(
+    slug: str, request: Request, session: Session = Depends(get_session)
+):
+    creds.delete_credentials(session, slug)
+    session.commit()
+    _log(session, request, "delete_credentials", {"slug": slug}, None)
+    return RedirectResponse("/sites", status_code=303)
+
+
+@router.post("/sites/{slug}/login")
+def start_login(slug: str, request: Request, session: Session = Depends(get_session)):
+    """Kick off a headless sign-in for one site, in the background."""
+    known = {c.slug for c in scan_sources()[0]}
+    if slug in known:
+        started, message = login_manager.start(slug)
+        _log(session, request, "login", {"slug": slug, "started": started, "message": message}, None)
+    return RedirectResponse("/sites", status_code=303)
