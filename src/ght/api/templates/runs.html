@@ -43,6 +43,11 @@
     request on the operator — no money moves and nothing is paid. You'll be asked to confirm.
   </p>
   {% endif %}
+  <p class="sub mute" style="margin-top:-2px">
+    If the site's login has expired, a browser window opens for you to sign in (solve the
+    CAPTCHA yourself); collection continues automatically once you're in. This needs a
+    desktop — run it from the machine you're sitting at, not a headless server.
+  </p>
 {% endif %}
 
 {{ ui.section("History", count=rows | length) }}

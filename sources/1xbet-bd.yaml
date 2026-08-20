@@ -10,13 +10,13 @@ urls:
     type: deposit
     current: true
 
-# Behind a login. Refresh the session either by hand (scripts/collect_1xbet.py --login)
-# or from the portal's Sites page, which uses the login block below with stored credentials.
+# Behind a login. The session is refreshed either by hand (scripts/collect_1xbet.py --login)
+# or automatically during a run using the login block below.
 auth_state: data/auth/1xbet-bd.json
 
-# Automated sign-in. Selectors are from the observed login form; verify against a live
-# page if the site redesigns. If a CAPTCHA/2FA appears (challenge below), login aborts and
-# asks for a hand-captured session instead — bot walls are not solved automatically.
+# Sign-in. Selectors are from the observed login form; verify against a live page if the
+# site redesigns. Because 1xBet shows a CAPTCHA, this is assisted (see below): a run that
+# finds the session expired opens a visible browser for the operator to sign in.
 login:
   url: https://bd.1xbet.com/en
   # The header "Log in" opens the auth form before the fields exist.
@@ -30,6 +30,11 @@ login:
     - 'iframe[src*="captcha"]'
     - 'iframe[src*="challenge"]'
     - 'text=/verification|captcha|not a robot/i'
+  # 1xBet shows a CAPTCHA on login that cannot be solved automatically, so open a visible
+  # browser and let the operator sign in by hand: they solve the CAPTCHA and press the
+  # site's Log in button, then collection continues. Needs a desktop — a headless server
+  # cannot show this window.
+  assisted: true
 
 # The payment panel is a separate app embedded in the account page. The flow clicks and
 # the block selectors all run inside this frame; from the outer document they match nothing.

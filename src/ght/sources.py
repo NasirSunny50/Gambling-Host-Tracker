@@ -137,13 +137,12 @@ class Probe(_Strict):
 
 
 class Login(_Strict):
-    """How to sign in to a site headlessly, with stored credentials.
+    """How to sign in to a site, so an expired session can be refreshed from a run.
 
-    Selectors only — the credentials themselves live encrypted in the database, never in
-    config. The flow is: optionally click ``open`` to reveal the form, fill ``username`` and
-    ``password``, click ``submit``, then wait for ``success`` to prove we are in. If any
-    ``challenge`` selector appears instead, login aborts: a CAPTCHA or 2FA prompt cannot be
-    solved automatically, and the operator is told to capture the session by hand.
+    Selectors only — no credentials are stored anywhere. In headless mode the flow fills the
+    fields and submits, aborting if a ``challenge`` selector (CAPTCHA / 2FA) appears. In
+    ``assisted`` mode a visible browser opens and the operator signs in by hand, which is the
+    only thing that gets past bot protection.
     """
 
     url: str
@@ -153,6 +152,10 @@ class Login(_Strict):
     success: str
     open: str | None = None
     challenge: list[str] = Field(default_factory=list)
+    # Open a visible browser and let the operator finish signing in by hand (solving the
+    # CAPTCHA / 2FA themselves), rather than attempting a fully headless login. Required for
+    # sites with bot protection. Needs a person at the machine with a desktop.
+    assisted: bool = False
 
 
 class SourceConfig(_Strict):
@@ -170,8 +173,8 @@ class SourceConfig(_Strict):
     # Produced either by a human signing in (scripts/collect_1xbet.py --login) or by the
     # automated login below; no credentials live in config either way.
     auth_state: str | None = None
-    # How to sign in automatically with stored credentials. Optional: without it, the only
-    # way to refresh the session is the hand-captured route.
+    # How to sign in to refresh an expired session. Optional: without it, the only way to
+    # refresh the session is the hand-captured route (scripts/collect_1xbet.py --login).
     login: Login | None = None
     # Force a specific browser for the browser fetcher (msedge / chrome). Left unset, the
     # fetcher tries the bundled Chromium first and falls back to installed browsers.

@@ -190,37 +190,26 @@ def _collect_captures(config: SourceConfig) -> tuple[list, str | None, bool]:
     return captures, source_url, auth_expired
 
 
-def _try_auto_login(session: Session, config: SourceConfig) -> tuple[bool, str]:
-    """Refresh an expired session from stored credentials. Returns (recovered, note).
+def _try_recover_login(config: SourceConfig) -> tuple[bool, str]:
+    """Refresh an expired session by signing in, then report whether it worked.
 
-    This is the headless self-heal: rather than failing a scheduled or portal-triggered run
-    and telling a human to sign in, use the site's stored credentials to sign in and carry
-    on. It still cannot pass a CAPTCHA or 2FA — if one appears the note says so and the run
-    falls back to reporting the expired session.
+    For a site with bot protection this opens a visible browser and waits for the operator
+    to complete the sign-in (solving the CAPTCHA themselves); the collection continues once
+    they are in. No credentials are stored — the person types them into the window.
     """
-    from ght import crypto
-    from ght.auth_login import perform_login
-    from ght.credentials import get_credentials
-
     if config.login is None:
-        return False, "no login flow is configured for automatic sign-in"
-    if not crypto.is_configured():
-        return False, "GHT_SECRET_KEY is not set, so stored credentials cannot be used"
-    try:
-        creds = get_credentials(session, config.slug)
-    except Exception as exc:  # noqa: BLE001 - a key problem is a reported result
-        return False, f"stored credentials could not be read: {exc}"
-    if creds is None:
-        return False, "no stored credentials to sign in with"
+        return False, "no login flow is configured"
 
-    result = perform_login(config, *creds)
+    from ght.auth_login import perform_login
+
+    result = perform_login(config)
     if result.ok:
-        return True, "signed in automatically with the stored credentials"
+        return True, "signed in through the login window"
+    if result.reason == "timeout":
+        return False, "the sign-in window was not completed in time"
     if result.reason == "challenge":
-        return False, "automatic sign-in hit a CAPTCHA or 2FA; capture the session by hand"
-    if result.reason == "bad_credentials":
-        return False, "the stored credentials were rejected at sign-in"
-    return False, f"automatic sign-in failed: {result.detail or result.reason}"
+        return False, "a CAPTCHA or 2FA appeared; this site needs assisted login (assisted: true)"
+    return False, f"sign-in failed: {result.detail or result.reason}"
 
 
 def run_site(session: Session, config: SourceConfig, dry_run: bool = False) -> RunReport:
@@ -233,7 +222,7 @@ def run_site(session: Session, config: SourceConfig, dry_run: bool = False) -> R
     # run stays side-effect-free, so it reports the expiry instead of signing in.
     auto_login_note = ""
     if auth_expired and not dry_run:
-        recovered, auto_login_note = _try_auto_login(session, config)
+        recovered, auto_login_note = _try_recover_login(config)
         if recovered:
             session.add(
                 Alert(type="auth_refreshed", site_id=site.id, payload={"note": auto_login_note})
@@ -271,16 +260,14 @@ def run_site(session: Session, config: SourceConfig, dry_run: bool = False) -> R
         # The fetch itself succeeded (a 200 logged-out page), so this is neither site_down
         # nor a stale selector. Name it for what it is and say how to fix it.
         if auto_login_note:
-            # Auto-recovery was tried and did not get us back in.
+            # Recovery was tried and did not get us back in.
             message = (
-                f"Login session expired and automatic sign-in did not recover it: "
-                f"{auto_login_note}. Capture the session by hand: "
-                "python scripts/collect_1xbet.py --login"
+                f"Login session expired and sign-in did not recover it: {auto_login_note}. "
+                "Sign in by hand: python scripts/collect_1xbet.py --login"
             )
         else:
             message = (
-                "Login session expired. Store credentials on the Sites page for automatic "
-                "sign-in, or capture the session by hand: "
+                "Login session expired. Sign in by hand: "
                 "python scripts/collect_1xbet.py --login"
             )
         run.status = "failed"

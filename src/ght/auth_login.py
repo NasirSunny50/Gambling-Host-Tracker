@@ -1,12 +1,19 @@
-"""Headless credential login, saving the session the collector reuses.
+"""Credential login, saving the session the collector reuses.
 
-Given a site's login config and its decrypted credentials, this drives a headless browser
-through the sign-in form and, on success, writes the session to the site's ``auth_state``
-file in the same wrapped format the browser fetcher reads.
+Two modes:
 
-It does not, and will not, defeat bot protection: if a CAPTCHA or a 2FA prompt appears, the
-attempt aborts with ``reason="challenge"`` so the operator knows to capture that site's
-session by hand instead. Credentials are typed into the page and never logged.
+* **Headless** (the default) fills the supplied credentials and submits, watching for a
+  success marker. If a CAPTCHA or 2FA appears it aborts — those cannot be solved
+  automatically, and trying to would be pointless.
+
+* **Assisted** (``login.assisted: true``) opens a *visible* browser on the operator's
+  machine, pre-fills the credentials, and then waits for the operator to finish signing in
+  by hand — solving the CAPTCHA and pressing the site's login button themselves. When the
+  success marker appears the session is captured. This is the reliable path for sites with
+  bot protection, at the cost of needing a person at the machine.
+
+Either way the credentials are typed once and never logged, and the saved session is
+written in the wrapped format the browser fetcher reads.
 """
 
 from __future__ import annotations
@@ -16,14 +23,21 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ght.config import settings
-from ght.fetchers.browser import BrowserFetcher
 from ght.sources import SourceConfig
+
+# How long the assisted flow waits for a human to finish. Generous: a person may need to
+# solve a CAPTCHA, receive a 2FA code, and click through.
+ASSISTED_WAIT_SECONDS = 300
+
+# Browsers to try, in order, when opening a window. Playwright's bundled Chromium first,
+# then the ones already installed — security software often blocks the bundled build.
+BROWSER_CHANNELS = (None, "msedge", "chrome")
 
 
 @dataclass(frozen=True)
 class LoginResult:
     ok: bool
-    reason: str  # "ok" | "challenge" | "bad_credentials" | "config" | "browser" | "error"
+    reason: str  # "ok" | "challenge" | "bad_credentials" | "timeout" | "config" | "browser" | "error"
     detail: str = ""
 
 
@@ -47,8 +61,26 @@ def _visible(page, selector: str) -> bool:
         return False
 
 
-def perform_login(config: SourceConfig, username: str, password: str) -> LoginResult:
-    """Sign in and save the session. Never raises for an expected failure — returns why."""
+def _launch(playwright, channel: str | None, headed: bool):
+    """Open a browser, trying each channel until one starts. Returns (browser, channel)."""
+    channels = (channel,) if channel else BROWSER_CHANNELS
+    failures = []
+    for candidate in channels:
+        try:
+            kwargs = {"channel": candidate} if candidate else {}
+            browser = playwright.chromium.launch(headless=not headed, **kwargs)
+            return browser, candidate
+        except Exception as exc:  # noqa: BLE001 - trying the next browser is the point
+            failures.append(f"{candidate or 'bundled chromium'} ({str(exc).splitlines()[0]})")
+    raise RuntimeError("no usable browser: " + "; ".join(failures))
+
+
+def perform_login(config: SourceConfig, username: str = "", password: str = "") -> LoginResult:
+    """Sign in and save the session. Never raises for an expected failure — returns why.
+
+    Credentials are optional: in assisted mode the operator can type them into the visible
+    window themselves, so they are only pre-filled when supplied.
+    """
     login = config.login
     if login is None:
         return LoginResult(False, "config", "no login block configured for this site")
@@ -60,13 +92,13 @@ def perform_login(config: SourceConfig, username: str, password: str) -> LoginRe
     except ImportError:
         return LoginResult(False, "browser", 'playwright not installed; pip install -e ".[browser]"')
 
+    assisted = login.assisted
     timeout_ms = (config.timeout or settings.request_timeout) * 1000
-    fetcher = BrowserFetcher(channel=config.browser_channel)
 
     try:
         with sync_playwright() as pw:
             try:
-                browser = fetcher._launch(pw)
+                browser, used_channel = _launch(pw, config.browser_channel, headed=assisted)
             except RuntimeError as exc:
                 return LoginResult(False, "browser", str(exc))
 
@@ -79,24 +111,17 @@ def perform_login(config: SourceConfig, username: str, password: str) -> LoginRe
             try:
                 page.goto(login.url, timeout=timeout_ms, wait_until="domcontentloaded")
 
-                # A challenge can appear before the form is even usable.
-                if any(_visible(page, sel) for sel in login.challenge):
-                    return LoginResult(False, "challenge", "challenge shown on the login page")
+                if assisted:
+                    outcome = _assisted(page, login, username, password, timeout_ms)
+                else:
+                    outcome = _headless(page, login, username, password, timeout_ms)
 
-                if login.open:
-                    page.click(login.open, timeout=timeout_ms)
-
-                page.fill(login.username, username, timeout=timeout_ms)
-                page.fill(login.password, password, timeout=timeout_ms)
-                page.click(login.submit, timeout=timeout_ms)
-
-                outcome = _await_outcome(page, login, timeout_ms)
                 if not outcome.ok:
                     return outcome
 
                 state = context.storage_state()
                 user_agent = page.evaluate("navigator.userAgent")
-                _save_state(config.auth_state, state, user_agent, fetcher._used_channel)
+                _save_state(config.auth_state, state, user_agent, used_channel)
                 return LoginResult(True, "ok", "signed in and saved the session")
             finally:
                 context.close()
@@ -105,20 +130,66 @@ def perform_login(config: SourceConfig, username: str, password: str) -> LoginRe
         return LoginResult(False, "error", f"{type(exc).__name__}: {exc}")
 
 
-def _await_outcome(page, login, timeout_ms: int) -> LoginResult:
-    """Poll for the success marker, a challenge, or a stuck form, whichever comes first."""
+def _open_form(page, login, timeout_ms: int) -> None:
+    if login.open:
+        page.click(login.open, timeout=timeout_ms)
+
+
+def _fill_form(page, login, username: str, password: str, timeout_ms: int) -> None:
+    """Best-effort: open the form and pre-fill it. Failures are swallowed in assisted mode."""
+    _open_form(page, login, timeout_ms)
+    if username:
+        page.fill(login.username, username, timeout=timeout_ms)
+    if password:
+        page.fill(login.password, password, timeout=timeout_ms)
+
+
+def _headless(page, login, username: str, password: str, timeout_ms: int) -> LoginResult:
+    """Fill, submit, and watch for success or a challenge we cannot pass."""
+    if any(_visible(page, sel) for sel in login.challenge):
+        return LoginResult(False, "challenge", "challenge shown on the login page")
+
+    _fill_form(page, login, username, password, timeout_ms)
+    page.click(login.submit, timeout=timeout_ms)
+
     waited = 0
-    step = 500
     while waited <= timeout_ms:
         if any(_visible(page, sel) for sel in login.challenge):
             return LoginResult(False, "challenge", "a CAPTCHA or 2FA prompt appeared")
         if _visible(page, login.success):
             return LoginResult(True, "ok")
-        page.wait_for_timeout(step)
-        waited += step
+        page.wait_for_timeout(500)
+        waited += 500
 
-    # Still on the form after the timeout usually means the credentials were rejected;
-    # otherwise the success selector has gone stale. Either way there is nothing to save.
     if _visible(page, login.password):
         return LoginResult(False, "bad_credentials", "still on the login form after submit")
     return LoginResult(False, "error", f"success selector {login.success!r} never appeared")
+
+
+def _assisted(page, login, username: str, password: str, timeout_ms: int) -> LoginResult:
+    """Pre-fill, then wait for the operator to finish signing in in the visible window.
+
+    The CAPTCHA and the final submit are the operator's to do; this only fills the fields
+    to save typing and then watches for the success marker. Challenges are *not* treated as
+    failures here — the whole point is that a human is present to clear them.
+    """
+    try:
+        if username or password:
+            _fill_form(page, login, username, password, timeout_ms)
+        else:
+            _open_form(page, login, timeout_ms)
+    except Exception:  # noqa: BLE001, S110 - the operator can open and fill it themselves
+        pass  # pre-fill is a convenience; the person can do it all in the window
+
+    deadline = ASSISTED_WAIT_SECONDS * 1000
+    waited = 0
+    while waited <= deadline:
+        if _visible(page, login.success):
+            return LoginResult(True, "ok")
+        page.wait_for_timeout(1000)
+        waited += 1000
+    return LoginResult(
+        False,
+        "timeout",
+        f"no successful sign-in within {ASSISTED_WAIT_SECONDS}s in the browser window",
+    )

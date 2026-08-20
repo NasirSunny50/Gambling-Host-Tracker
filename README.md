@@ -107,29 +107,28 @@ evidence trail, runs, alerts, merchant sightings) with a CSV export. The Runs pa
 launch a collection in the background, one at a time, and every search, export, run and
 login is written to `access_log`.
 
-## Credentials & automated login
+## Login & session recovery
 
-The **Sites** page stores each site's login and can sign in headlessly to refresh its
-session, so collection doesn't depend on a hand-captured session.
+Deposit pages sit behind a login, and the sites use bot protection (a CAPTCHA on sign-in)
+that can't be solved automatically. So login is **assisted**, not headless:
 
-- Credentials are encrypted at rest with a Fernet key from `GHT_SECRET_KEY` — generate one
-  with `ght gen-key`. **Fails closed:** with no key, credentials can't be stored or read;
-  they're never kept in plaintext. Back the key up — losing it makes stored logins
-  unreadable. Passwords are never rendered back to the page or written to a log.
-- Each site needs a `login:` block in its source config (form selectors + a success marker).
-  The **Log in** button fills the stored credentials and saves the session the collector
-  reuses.
-- **Automatic recovery.** If a run finds the session expired, it signs in from the stored
-  credentials and collects again in the same run — no manual step. It raises an
-  `auth_refreshed` alert when it self-heals.
-- **CAPTCHA / 2FA is not solved.** If a challenge appears during login (manual or
-  automatic), it aborts and raises a `login_challenge` alert; refresh that site's session by
-  hand instead (`scripts/collect_1xbet.py --login`).
+- A site with a `login:` block marked `assisted: true` (form selectors + a success marker)
+  supports one-click sign-in.
+- When **Run collection** finds the session expired, a **visible browser window opens** for
+  the operator to sign in — solving the CAPTCHA and pressing the site's login button
+  themselves. The moment the success marker appears, the session is captured and collection
+  continues in the same run (an `auth_refreshed` alert records the self-heal).
+- No credentials are stored anywhere: the person types them into the window. If nobody
+  completes the sign-in within a few minutes, the run reports the expiry and stops.
+
+> **This needs a desktop.** The assisted window has to appear on a screen the operator is
+> looking at, so run the portal on that machine (the Windows launchers do this). A headless
+> server can't show the window — there, refresh the session out-of-band with
+> `scripts/collect_1xbet.py --login` and let unattended runs reuse it.
 
 > **Before production.** The portal has no authentication and binds to loopback
-> (`127.0.0.1`) on purpose. Once it stores credentials and can trigger logins, it must sit
-> behind an authenticating reverse proxy (or equivalent) before it is exposed beyond
-> localhost — do not bind it to `0.0.0.0` without that in place.
+> (`127.0.0.1`) on purpose. It must sit behind an authenticating reverse proxy before it is
+> exposed beyond localhost — do not bind it to `0.0.0.0` without that in place.
 
 ## How it holds up when a site changes
 
