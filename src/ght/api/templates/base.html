@@ -146,6 +146,16 @@
     .empty-body { color:var(--dim); max-width:440px; margin:0 auto; }
     td .empty { padding:34px 24px; }
 
+    /* ---- pagination ------------------------------------------------------ */
+    .pager { display:flex; align-items:center; gap:10px; margin-top:14px; flex-wrap:wrap; }
+    .pager .range { color:var(--dim); font-size:13px; }
+    .pager .spread { margin-left:auto; display:flex; gap:6px; align-items:center; }
+    .pager .step { padding:7px 12px; border:1px solid var(--border); border-radius:var(--radius-sm);
+                   background:var(--surface-2); color:var(--text); font-weight:550; }
+    .pager .step:hover { border-color:var(--border-strong); text-decoration:none; }
+    .pager .step--off { color:var(--mute); background:transparent; }
+    .pager .where { color:var(--dim); font-size:13px; }
+
     /* ---- misc ------------------------------------------------------------- */
     .callout { background:var(--surface); border:1px solid var(--border);
                border-left:3px solid var(--accent); border-radius:var(--radius-sm);
@@ -165,8 +175,7 @@
     <span class="brand"><span class="dot"></span>Host Tracker</span>
     <nav class="nav">
       <a href="/"          class="{{ 'on' if page == 'dashboard' }}">Overview</a>
-      <a href="/accounts"  class="{{ 'on' if page == 'accounts' }}">Accounts</a>
-      <a href="/merchants" class="{{ 'on' if page == 'merchants' }}">Merchants</a>
+      <a href="/payees"    class="{{ 'on' if page in ('payees', 'accounts') }}">Payees</a>
       <a href="/runs"      class="{{ 'on' if page == 'runs' }}">Runs</a>
       <a href="/alerts"    class="{{ 'on' if page == 'alerts' }}">Alerts</a>
     </nav>

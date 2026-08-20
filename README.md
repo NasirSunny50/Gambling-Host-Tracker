@@ -101,8 +101,10 @@ request on the operator — no funds move — and the portal names those probes 
 
 ## Portal
 
-`ght serve` starts a server-rendered portal (dashboard, searchable accounts, per-account
-evidence trail, runs, alerts, merchant sightings) with a CSV export. The Runs page can
+`ght serve` starts a server-rendered portal: an overview, a **Payees** page holding both
+kinds of payee (numbered accounts and name-only merchants, paged and filterable), the
+evidence trail behind any one account, runs, and alerts. CSV export covers the whole
+filtered set, not just the page on screen. The Runs page can
 launch a collection in the background, one at a time, and every search, export, run and
 login is written to `access_log`.
 

@@ -64,3 +64,27 @@
   <tbody>{{ caller() }}</tbody>
 </table></div>
 {%- endmacro %}
+
+{# Pagination control. `params` are the filters to carry across pages, so paging never
+   silently drops the filter the reader is looking at. #}
+{% macro pager(p, base, params) -%}
+{% if p.total -%}
+{% set qs = [] %}
+{% for key, value in params.items() %}{% if value %}{% set _ = qs.append(key ~ "=" ~ value) %}{% endif %}{% endfor %}
+{% set base_qs = qs | join("&") %}
+<nav class="pager" aria-label="Pagination">
+  <span class="range">Showing {{ p.first_row }}&ndash;{{ p.last_row }} of {{ p.total }}</span>
+  {% if p.pages > 1 %}
+  <span class="spread">
+    {% if p.has_prev %}
+      <a class="step" href="{{ base }}?{{ base_qs }}{{ '&' if base_qs }}page={{ p.number - 1 }}">Previous</a>
+    {% else %}<span class="step step--off">Previous</span>{% endif %}
+    <span class="where">Page {{ p.number }} of {{ p.pages }}</span>
+    {% if p.has_next %}
+      <a class="step" href="{{ base }}?{{ base_qs }}{{ '&' if base_qs }}page={{ p.number + 1 }}">Next</a>
+    {% else %}<span class="step step--off">Next</span>{% endif %}
+  </span>
+  {% endif %}
+</nav>
+{%- endif %}
+{%- endmacro %}

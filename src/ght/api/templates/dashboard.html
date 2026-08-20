@@ -11,9 +11,9 @@
 <p class="sub">Payment accounts advertised on the deposit pages we track.</p>
 
 <div class="stat-grid">
-  {{ ui.stat(totals.active, "Active accounts", href="/accounts?status=active", tone="accent") }}
-  {{ ui.stat(totals.accounts, "Seen all-time", href="/accounts") }}
-  {{ ui.stat(totals.review, "Needs review", href="/accounts?status=review", tone="warn" if totals.review else "") }}
+  {{ ui.stat(totals.active, "Active accounts", href="/payees?status=active", tone="accent") }}
+  {{ ui.stat(totals.accounts, "Seen all-time", href="/payees") }}
+  {{ ui.stat(totals.review, "Needs review", href="/payees?status=review", tone="warn" if totals.review else "") }}
   {{ ui.stat(totals.sites, "Sites tracked", href="/runs") }}
 </div>
 
@@ -22,7 +22,7 @@
 {% call ui.table(["Channel", "#Active"]) %}
   {% for channel, count in by_channel %}
   <tr>
-    <td><a href="/accounts?channel={{ channel }}&status=active" style="text-decoration:none">{{ ui.channel(channel) }}</a></td>
+    <td><a href="/payees?channel={{ channel }}&status=active" style="text-decoration:none">{{ ui.channel(channel) }}</a></td>
     <td class="num">{{ count }}</td>
   </tr>
   {% endfor %}

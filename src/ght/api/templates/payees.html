@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+{% import "_macros.html" as ui %}
+{% set page = "payees" %}
+{% block title %}Payees — Host Tracker{% endblock %}
+{% block body %}
+
+{# Short alias: `pagination` describes the slice being shown. #}
+{% set p = pagination %}
+
+<div class="head">
+  <h1>Payees</h1>
+  {% if view == "accounts" %}
+  <div class="actions">
+    <a class="btn" href="/accounts.csv?channel={{ channel or '' }}&status={{ status }}&q={{ q }}">Download CSV</a>
+  </div>
+  {% endif %}
+</div>
+<p class="sub">Who the deposits are going to.</p>
+
+<div class="tabs">
+  <a href="/payees" class="tab {{ 'tab--on' if view == 'accounts' }}">
+    Accounts{% if view == "accounts" %} <span class="tab-count">{{ p.total }}</span>{% endif %}
+  </a>
+  <a href="/payees?view=merchants" class="tab {{ 'tab--on' if view == 'merchants' }}">
+    Merchants{% if view == "merchants" %} <span class="tab-count">{{ p.total }}</span>{% endif %}
+  </a>
+</div>
+
+{% if view == "accounts" %}
+  {# ---------------------------------------------------------------- accounts #}
+  <form class="toolbar" method="get" action="/payees">
+    <input type="search" name="q" value="{{ q }}" placeholder="Search number, holder or bank">
+    <select name="channel">
+      <option value="">All channels</option>
+      {% for c in channels %}
+        <option value="{{ c }}" {{ "selected" if c == channel }}>{{ ui.CHANNEL_LABELS.get(c, c) }}</option>
+      {% endfor %}
+    </select>
+    <select name="status">
+      {% for value, label in [("all","Any status"), ("active","Active"), ("inactive","Gone"), ("review","Needs review")] %}
+        <option value="{{ value }}" {{ "selected" if value == status }}>{{ label }}</option>
+      {% endfor %}
+    </select>
+    <button class="btn-primary" type="submit">Apply</button>
+  </form>
+
+  {% if rows %}
+  {% call ui.table(["Channel", "Number", "Holder", "Bank", "Confidence", "#Seen", "Last seen", "Status"]) %}
+    {% for a in rows %}
+    <tr>
+      <td>{{ ui.channel(a.channel) }}</td>
+      <td>{{ ui.number(a) }}</td>
+      <td>{{ a.holder_name or "—" }}</td>
+      <td>{{ a.bank_name or "—" }}</td>
+      <td>{{ ui.confidence(a.confidence) }}</td>
+      <td class="num dim">{{ a.observation_count }}×</td>
+      <td class="dim">{{ a.last_seen_at | age }}</td>
+      <td>{{ ui.account_state(a) }}</td>
+    </tr>
+    {% endfor %}
+  {% endcall %}
+  {{ ui.pager(p, "/payees", {"q": q, "channel": channel or "", "status": status}) }}
+  {% elif q or channel or status != "all" %}
+  <div class="panel">{{ ui.empty("No matches", "Nothing matches this filter. Try clearing the search or widening the status.") }}</div>
+  {% else %}
+  <div class="panel">{{ ui.empty("No accounts yet", "Run a collection from the Runs page to start pulling payee details.") }}</div>
+  {% endif %}
+
+{% else %}
+  {# ---------------------------------------------------------------- merchants #}
+  <div class="callout">
+    These come from methods that hand off to the payment provider's own checkout, which names
+    a business instead of showing an account number. The name rotates per deposit request, so
+    a name missing today doesn't mean it's out of use — nothing here is ever marked gone. The
+    value is the pool of names building up over time.
+    <span class="dim">{{ p.total }} distinct name{{ "" if p.total == 1 else "s" }} across {{ sightings }} sighting{{ "" if sightings == 1 else "s" }}.</span>
+  </div>
+
+  {% if rows %}
+  {% call ui.table(["Merchant", "Channel", "Probe", "#Times", "First seen", "Last seen"]) %}
+    {% for name, channel_, probe, times, first_seen, last_seen in rows %}
+    <tr>
+      <td>{{ name }}</td>
+      <td>{{ ui.channel(channel_) }}</td>
+      <td class="dim mono">{{ probe }}</td>
+      <td class="num">{{ times }}×</td>
+      <td class="dim">{{ first_seen | age }}</td>
+      <td class="dim">{{ last_seen | age }}</td>
+    </tr>
+    {% endfor %}
+  {% endcall %}
+  {{ ui.pager(p, "/payees", {"view": "merchants"}) }}
+  {% else %}
+  <div class="panel">{{ ui.empty("No name-only payees yet", "Methods that route through a provider checkout — like Fast Nagad — will list their rotating merchant names here once collected.") }}</div>
+  {% endif %}
+{% endif %}
+
+<style>
+  .tabs { display:flex; gap:4px; margin:0 0 16px; border-bottom:1px solid var(--border); }
+  .tab { padding:9px 14px; color:var(--dim); border-bottom:2px solid transparent;
+         margin-bottom:-1px; font-weight:550; }
+  .tab:hover { color:var(--text); text-decoration:none; }
+  .tab--on { color:var(--text); border-bottom-color:var(--accent); }
+  .tab-count { font-size:12px; color:var(--dim); background:var(--surface-2);
+               border:1px solid var(--border); border-radius:999px; padding:0 7px; margin-left:4px; }
+</style>
+
+{% endblock %}

@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import csv
 import io
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from math import ceil
 
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
@@ -128,6 +130,62 @@ def dashboard(request: Request, session: Session = Depends(get_session)):
     )
 
 
+# Rows per page. Big enough that scanning still beats paging for a normal day's
+# collection, small enough that a first render stays quick once months have accumulated.
+PAGE_SIZE = 50
+
+
+@dataclass(frozen=True)
+class Page:
+    """One slice of a result set, with what a pager needs to describe it."""
+
+    number: int
+    size: int
+    total: int
+
+    @property
+    def pages(self) -> int:
+        return max(1, ceil(self.total / self.size))
+
+    @property
+    def offset(self) -> int:
+        return (self.number - 1) * self.size
+
+    @property
+    def first_row(self) -> int:
+        return 0 if not self.total else self.offset + 1
+
+    @property
+    def last_row(self) -> int:
+        return min(self.offset + self.size, self.total)
+
+    @property
+    def has_prev(self) -> bool:
+        return self.number > 1
+
+    @property
+    def has_next(self) -> bool:
+        return self.number < self.pages
+
+
+def _paginate(session: Session, stmt, page_number: int, scalar: bool = True) -> tuple[list, Page]:
+    """Return one page of rows plus its description.
+
+    The count runs against the same filtered statement, so "of 214" always matches what the
+    filters actually select rather than the size of the table. ``scalar`` picks how to read
+    the rows: ORM entities come back as objects, a grouped/aggregate select as tuples.
+    """
+    total = session.scalar(select(func.count()).select_from(stmt.order_by(None).subquery())) or 0
+    page = Page(number=max(1, page_number), size=PAGE_SIZE, total=total)
+    # A stale page number (bookmarked, or the set shrank) should show the last page rather
+    # than an empty screen that looks like "nothing matches".
+    if page.number > page.pages:
+        page = Page(number=page.pages, size=PAGE_SIZE, total=total)
+    sliced = stmt.limit(page.size).offset(page.offset)
+    rows = session.scalars(sliced).all() if scalar else session.execute(sliced).all()
+    return list(rows), page
+
+
 def _account_query(channel: str | None, status: str, q: str | None):
     stmt = select(Account)
     if channel:
@@ -148,31 +206,103 @@ def _account_query(channel: str | None, status: str, q: str | None):
     return stmt
 
 
-@router.get("/accounts", response_class=HTMLResponse)
-def accounts(
+def _merchant_query():
+    """Name-only payees, grouped by name.
+
+    The interesting quantity is how many distinct merchants an operator cycles through and
+    how recently each was used, not the raw sightings.
+    """
+    return (
+        select(
+            MerchantSighting.merchant_name,
+            MerchantSighting.channel,
+            MerchantSighting.probe,
+            func.count().label("times"),
+            func.min(MerchantSighting.seen_at).label("first_seen"),
+            func.max(MerchantSighting.seen_at).label("last_seen"),
+        )
+        .group_by(MerchantSighting.merchant_name, MerchantSighting.channel, MerchantSighting.probe)
+        .order_by(func.max(MerchantSighting.seen_at).desc())
+    )
+
+
+@router.get("/payees", response_class=HTMLResponse)
+def payees(
     request: Request,
+    view: str = "accounts",
     channel: str | None = None,
     status: str = "all",
     q: str | None = None,
+    page: int = 1,
     session: Session = Depends(get_session),
 ):
-    rows = session.scalars(
-        _account_query(channel, status, q).order_by(Account.last_seen_at.desc())
-    ).all()
-    _log(session, request, "search", {"channel": channel, "status": status, "q": q}, len(rows))
+    """Everything the collector found a payee for, in one place.
 
+    Two kinds live here because the sites produce two kinds. Most payees are an account
+    number we can de-duplicate and track over time; some routes only ever name a business,
+    with a name that changes on every request. They share a page but not a table: forcing
+    them into one would mean inventing columns neither of them has.
+    """
+    view = "merchants" if view == "merchants" else "accounts"
+
+    if view == "merchants":
+        stmt = _merchant_query()
+        total = session.scalar(select(func.count()).select_from(MerchantSighting)) or 0
+        counted = session.scalar(
+            select(func.count()).select_from(stmt.order_by(None).subquery())
+        ) or 0
+        rows, page_info = _paginate(session, stmt, page, scalar=False)
+        _log(session, request, "search", {"view": "merchants", "page": page_info.number}, counted)
+        return templates.TemplateResponse(
+            request,
+            "payees.html",
+            {
+                "view": view,
+                "rows": rows,
+                "pagination": page_info,
+                "sightings": total,
+                "channels": [],
+                "channel": None,
+                "status": "all",
+                "q": "",
+            },
+        )
+
+    stmt = _account_query(channel, status, q).order_by(Account.last_seen_at.desc())
+    rows, page_info = _paginate(session, stmt, page)
+    _log(
+        session,
+        request,
+        "search",
+        {"view": "accounts", "channel": channel, "status": status, "q": q, "page": page_info.number},
+        page_info.total,
+    )
     channels = session.scalars(select(Account.channel).distinct().order_by(Account.channel)).all()
     return templates.TemplateResponse(
         request,
-        "accounts.html",
+        "payees.html",
         {
+            "view": view,
             "rows": rows,
+            "pagination": page_info,
             "channels": channels,
             "channel": channel,
             "status": status,
             "q": q or "",
         },
     )
+
+
+@router.get("/accounts", response_class=HTMLResponse)
+def accounts_redirect(request: Request):
+    """Kept so existing links and bookmarks survive the merge."""
+    query = request.url.query
+    return RedirectResponse(f"/payees{'?' + query if query else ''}", status_code=307)
+
+
+@router.get("/merchants", response_class=HTMLResponse)
+def merchants_redirect(request: Request):
+    return RedirectResponse("/payees?view=merchants", status_code=307)
 
 
 @router.get("/accounts/{account_id}", response_class=HTMLResponse)
@@ -279,34 +409,6 @@ def alerts(request: Request, session: Session = Depends(get_session)):
     accounts_by_id = {a.id: a for a in session.scalars(select(Account))}
     return templates.TemplateResponse(
         request, "alerts.html", {"rows": rows, "sites": sites, "accounts": accounts_by_id}
-    )
-
-
-@router.get("/merchants", response_class=HTMLResponse)
-def merchants(request: Request, session: Session = Depends(get_session)):
-    """Payees that only ever showed a name.
-
-    Grouped by name rather than listed raw: the interesting quantity is how many distinct
-    merchants an operator cycles through, and how recently each was used.
-    """
-    grouped = session.execute(
-        select(
-            MerchantSighting.merchant_name,
-            MerchantSighting.channel,
-            MerchantSighting.probe,
-            func.count().label("times"),
-            func.min(MerchantSighting.seen_at).label("first_seen"),
-            func.max(MerchantSighting.seen_at).label("last_seen"),
-        )
-        .group_by(
-            MerchantSighting.merchant_name, MerchantSighting.channel, MerchantSighting.probe
-        )
-        .order_by(func.max(MerchantSighting.seen_at).desc())
-    ).all()
-    total = session.scalar(select(func.count()).select_from(MerchantSighting)) or 0
-    _log(session, request, "search", {"view": "merchants"}, len(grouped))
-    return templates.TemplateResponse(
-        request, "merchants.html", {"rows": grouped, "total": total}
     )
 
 
