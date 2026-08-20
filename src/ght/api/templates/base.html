@@ -177,7 +177,6 @@
       <a href="/"          class="{{ 'on' if page == 'dashboard' }}">Overview</a>
       <a href="/payees"    class="{{ 'on' if page in ('payees', 'accounts') }}">Payees</a>
       <a href="/runs"      class="{{ 'on' if page == 'runs' }}">Runs</a>
-      <a href="/alerts"    class="{{ 'on' if page == 'alerts' }}">Alerts</a>
     </nav>
     <span class="spacer"></span>
     {% if job and job.is_running %}

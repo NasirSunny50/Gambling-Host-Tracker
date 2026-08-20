@@ -74,11 +74,10 @@
 {% endif %}
 
 {{ ui.section("History", count=rows | length) }}
-{% call ui.table(["#", "Started", "Site", "Status", "#Found", "#New", "#Evidence", "Note"]) %}
+{% call ui.table(["Started", "Site", "Status", "#Payees found", "#New", "#Pages saved", "Note"]) %}
   {% for r in rows %}
   <tr>
-    <td class="num mute">{{ r.id }}</td>
-    <td class="dim">{{ r.started_at | age }}</td>
+    <td class="dim mono">{{ r.started_at | stamp }}</td>
     <td>{{ sites[r.site_id].slug if r.site_id in sites else r.site_id }}</td>
     <td>{{ ui.tag(r.status, "ok" if r.status == "ok" else ("warn" if r.status == "partial" else "bad")) }}</td>
     <td class="num">{{ r.candidates_found }}</td>
@@ -87,7 +86,7 @@
     <td class="dim">{{ (r.error or "—")[:70] }}</td>
   </tr>
   {% else %}
-  <tr><td colspan="8">{{ ui.empty("No runs yet", "Use “Run collection” above to fetch this site for the first time.") }}</td></tr>
+  <tr><td colspan="7">{{ ui.empty("No runs yet", "Use “Run collection” above to fetch this site for the first time.") }}</td></tr>
   {% endfor %}
 {% endcall %}
 

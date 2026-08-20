@@ -64,18 +64,4 @@
   {% endfor %}
 {% endcall %}
 
-{{ ui.section("Recent alerts") }}
-{% call ui.table(["When", "Type", "Site", "Detail"]) %}
-  {% for a in alerts %}
-  <tr>
-    <td class="dim">{{ a.created_at | age }}</td>
-    <td>{{ ui.alert_tag(a.type) }}</td>
-    <td>{{ sites[a.site_id].slug if a.site_id in sites else "—" }}</td>
-    <td class="dim mono">{{ (a.payload | string)[:80] }}</td>
-  </tr>
-  {% else %}
-  <tr><td colspan="4">{{ ui.empty("No alerts", "New payees, payees that stop appearing, and collection problems will show up here.") }}</td></tr>
-  {% endfor %}
-{% endcall %}
-
 {% endblock %}

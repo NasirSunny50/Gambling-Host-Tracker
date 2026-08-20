@@ -16,7 +16,7 @@ from math import ceil
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import func, select
+from sqlalchemy import String, func, literal, select, union_all
 from sqlalchemy.orm import Session
 
 from ght.api import TEMPLATES_DIR
@@ -26,7 +26,6 @@ from ght.models import (
     AccessLog,
     Account,
     AccountSite,
-    Alert,
     CollectionRun,
     Evidence,
     MerchantSighting,
@@ -82,7 +81,18 @@ def _age(value: datetime | None) -> str:
     return f"{delta.days}d ago"
 
 
+def _stamp(value: datetime | None) -> str:
+    """An exact timestamp. Relative ages read nicely but hide when something happened,
+    which is the thing a case file has to state."""
+    if value is None:
+        return "—"
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=UTC)
+    return value.astimezone().strftime("%Y-%m-%d %H:%M")
+
+
 templates.env.filters["age"] = _age
+templates.env.filters["stamp"] = _stamp
 templates.env.filters["channel"] = lambda value: CHANNEL_LABELS.get(value, value)
 # The base layout shows a live "collecting…" flag on every page, so the manager is a
 # template global rather than something each route has to remember to pass.
@@ -112,7 +122,6 @@ def dashboard(request: Request, session: Session = Depends(get_session)):
     runs = session.scalars(
         select(CollectionRun).order_by(CollectionRun.started_at.desc()).limit(8)
     ).all()
-    alerts = session.scalars(select(Alert).order_by(Alert.created_at.desc()).limit(10)).all()
     newest = session.scalars(select(Account).order_by(Account.first_seen_at.desc()).limit(8)).all()
     sites = {s.id: s for s in session.scalars(select(Site))}
 
@@ -123,16 +132,16 @@ def dashboard(request: Request, session: Session = Depends(get_session)):
             "totals": totals,
             "by_channel": by_channel,
             "runs": runs,
-            "alerts": alerts,
             "newest": newest,
             "sites": sites,
         },
     )
 
 
-# Rows per page. Big enough that scanning still beats paging for a normal day's
-# collection, small enough that a first render stays quick once months have accumulated.
-PAGE_SIZE = 50
+# Rows per page. Ten by default: a payee list is read row by row, not skimmed, and a short
+# page keeps the reader oriented. The other sizes are there for anyone comparing in bulk.
+PAGE_SIZE = 10
+PAGE_SIZES = (10, 25, 50, 100)
 
 
 @dataclass(frozen=True)
@@ -168,7 +177,9 @@ class Page:
         return self.number < self.pages
 
 
-def _paginate(session: Session, stmt, page_number: int, scalar: bool = True) -> tuple[list, Page]:
+def _paginate(
+    session: Session, stmt, page_number: int, per_page: int = PAGE_SIZE, scalar: bool = True
+) -> tuple[list, Page]:
     """Return one page of rows plus its description.
 
     The count runs against the same filtered statement, so "of 214" always matches what the
@@ -176,11 +187,11 @@ def _paginate(session: Session, stmt, page_number: int, scalar: bool = True) -> 
     the rows: ORM entities come back as objects, a grouped/aggregate select as tuples.
     """
     total = session.scalar(select(func.count()).select_from(stmt.order_by(None).subquery())) or 0
-    page = Page(number=max(1, page_number), size=PAGE_SIZE, total=total)
+    page = Page(number=max(1, page_number), size=per_page, total=total)
     # A stale page number (bookmarked, or the set shrank) should show the last page rather
     # than an empty screen that looks like "nothing matches".
     if page.number > page.pages:
-        page = Page(number=page.pages, size=PAGE_SIZE, total=total)
+        page = Page(number=page.pages, size=per_page, total=total)
     sliced = stmt.limit(page.size).offset(page.offset)
     rows = session.scalars(sliced).all() if scalar else session.execute(sliced).all()
     return list(rows), page
@@ -206,89 +217,110 @@ def _account_query(channel: str | None, status: str, q: str | None):
     return stmt
 
 
-def _merchant_query():
-    """Name-only payees, grouped by name.
+def _payee_query(channel: str | None, status: str, q: str | None):
+    """Accounts and name-only merchants as one list, newest sighting first.
 
-    The interesting quantity is how many distinct merchants an operator cycles through and
-    how recently each was used, not the raw sightings.
+    They are different things — an account is a de-duplicated identity with a number and a
+    status, a merchant is a name that changes on every request — but the question a reader
+    brings is the same: who is receiving the deposits. A union keeps them in one ordered,
+    pageable list without pretending a merchant has fields it does not.
     """
-    return (
-        select(
-            MerchantSighting.merchant_name,
-            MerchantSighting.channel,
-            MerchantSighting.probe,
-            func.count().label("times"),
-            func.min(MerchantSighting.seen_at).label("first_seen"),
-            func.max(MerchantSighting.seen_at).label("last_seen"),
-        )
-        .group_by(MerchantSighting.merchant_name, MerchantSighting.channel, MerchantSighting.probe)
-        .order_by(func.max(MerchantSighting.seen_at).desc())
+    accounts = select(
+        Account.id.label("id"),
+        literal("account").label("kind"),
+        Account.channel.label("channel"),
+        Account.account_number.label("number"),
+        Account.holder_name.label("name"),
+        Account.bank_name.label("bank"),
+        Account.confidence.label("confidence"),
+        Account.observation_count.label("times"),
+        Account.last_seen_at.label("last_seen"),
+        Account.is_active.label("is_active"),
+        Account.needs_review.label("needs_review"),
     )
+    if channel:
+        accounts = accounts.where(Account.channel == channel)
+    if status == "active":
+        accounts = accounts.where(Account.is_active)
+    elif status == "inactive":
+        accounts = accounts.where(~Account.is_active)
+    elif status == "review":
+        accounts = accounts.where(Account.needs_review)
+    if q:
+        like = f"%{q.strip()}%"
+        accounts = accounts.where(
+            Account.account_number.like(like)
+            | Account.holder_name.like(like)
+            | Account.bank_name.like(like)
+        )
+
+    merchants = (
+        select(
+            literal(None).label("id"),
+            literal("merchant").label("kind"),
+            MerchantSighting.channel.label("channel"),
+            literal(None, String).label("number"),
+            MerchantSighting.merchant_name.label("name"),
+            literal(None, String).label("bank"),
+            literal(None).label("confidence"),
+            func.count().label("times"),
+            func.max(MerchantSighting.seen_at).label("last_seen"),
+            literal(None).label("is_active"),
+            literal(None).label("needs_review"),
+        )
+        .group_by(MerchantSighting.merchant_name, MerchantSighting.channel)
+    )
+    if channel:
+        merchants = merchants.where(MerchantSighting.channel == channel)
+    if q:
+        merchants = merchants.where(MerchantSighting.merchant_name.like(f"%{q.strip()}%"))
+
+    # A merchant has no status to filter on, so any status filter is a filter to accounts.
+    if status in {"active", "inactive", "review"}:
+        return accounts.order_by(Account.last_seen_at.desc())
+
+    combined = union_all(accounts, merchants).subquery()
+    return select(combined).order_by(combined.c.last_seen.desc())
 
 
 @router.get("/payees", response_class=HTMLResponse)
 def payees(
     request: Request,
-    view: str = "accounts",
     channel: str | None = None,
     status: str = "all",
     q: str | None = None,
     page: int = 1,
+    per: int = PAGE_SIZE,
     session: Session = Depends(get_session),
 ):
-    """Everything the collector found a payee for, in one place.
-
-    Two kinds live here because the sites produce two kinds. Most payees are an account
-    number we can de-duplicate and track over time; some routes only ever name a business,
-    with a name that changes on every request. They share a page but not a table: forcing
-    them into one would mean inventing columns neither of them has.
-    """
-    view = "merchants" if view == "merchants" else "accounts"
-
-    if view == "merchants":
-        stmt = _merchant_query()
-        total = session.scalar(select(func.count()).select_from(MerchantSighting)) or 0
-        counted = session.scalar(
-            select(func.count()).select_from(stmt.order_by(None).subquery())
-        ) or 0
-        rows, page_info = _paginate(session, stmt, page, scalar=False)
-        _log(session, request, "search", {"view": "merchants", "page": page_info.number}, counted)
-        return templates.TemplateResponse(
-            request,
-            "payees.html",
-            {
-                "view": view,
-                "rows": rows,
-                "pagination": page_info,
-                "sightings": total,
-                "channels": [],
-                "channel": None,
-                "status": "all",
-                "q": "",
-            },
-        )
-
-    stmt = _account_query(channel, status, q).order_by(Account.last_seen_at.desc())
-    rows, page_info = _paginate(session, stmt, page)
+    """One list of every payee the collector has seen."""
+    per_page = per if per in PAGE_SIZES else PAGE_SIZE
+    stmt = _payee_query(channel, status, q)
+    rows, page_info = _paginate(session, stmt, page, per_page=per_page, scalar=False)
     _log(
         session,
         request,
         "search",
-        {"view": "accounts", "channel": channel, "status": status, "q": q, "page": page_info.number},
+        {"channel": channel, "status": status, "q": q, "page": page_info.number},
         page_info.total,
     )
-    channels = session.scalars(select(Account.channel).distinct().order_by(Account.channel)).all()
+
+    channels = sorted(
+        set(session.scalars(select(Account.channel).distinct()).all())
+        | set(session.scalars(select(MerchantSighting.channel).distinct()).all())
+    )
     return templates.TemplateResponse(
         request,
         "payees.html",
         {
-            "view": view,
             "rows": rows,
             "pagination": page_info,
             "channels": channels,
             "channel": channel,
             "status": status,
             "q": q or "",
+            "per": per_page,
+            "page_sizes": PAGE_SIZES,
         },
     )
 
@@ -302,7 +334,7 @@ def accounts_redirect(request: Request):
 
 @router.get("/merchants", response_class=HTMLResponse)
 def merchants_redirect(request: Request):
-    return RedirectResponse("/payees?view=merchants", status_code=307)
+    return RedirectResponse("/payees", status_code=307)
 
 
 @router.get("/accounts/{account_id}", response_class=HTMLResponse)
@@ -400,16 +432,6 @@ def start_run(request: Request, slug: str = Form(...), session: Session = Depend
     started, message = manager.start(slug)
     _log(session, request, "run", {"slug": slug, "started": started, "message": message}, None)
     return RedirectResponse("/runs", status_code=303)
-
-
-@router.get("/alerts", response_class=HTMLResponse)
-def alerts(request: Request, session: Session = Depends(get_session)):
-    rows = session.scalars(select(Alert).order_by(Alert.created_at.desc()).limit(200)).all()
-    sites = {s.id: s for s in session.scalars(select(Site))}
-    accounts_by_id = {a.id: a for a in session.scalars(select(Account))}
-    return templates.TemplateResponse(
-        request, "alerts.html", {"rows": rows, "sites": sites, "accounts": accounts_by_id}
-    )
 
 
 @router.get("/accounts.csv")

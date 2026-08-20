@@ -39,6 +39,14 @@
 </span>
 {%- endmacro %}
 
+{# Same as number(), for rows that are plain tuples rather than ORM objects. #}
+{% macro number_text(account_id, value) -%}
+<span class="num-cell">
+  <a class="mono" href="/accounts/{{ account_id }}">{{ value }}</a>
+  <button class="copy" title="Copy" onclick="copyText(this, '{{ value }}')">&#10696;</button>
+</span>
+{%- endmacro %}
+
 {% macro stat(n, label, href=None, tone="") -%}
 {% if href %}<a class="stat {{ tone }}" href="{{ href }}">{% else %}<div class="stat {{ tone }}">{% endif %}
   <div class="stat-n">{{ n }}</div>
