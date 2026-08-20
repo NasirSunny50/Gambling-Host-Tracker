@@ -42,7 +42,7 @@ pressure, and will be looking at this alongside other systems.
 
 ## 4. Screens
 
-Six screens, one persistent navigation. Every screen is server-rendered; a page reload is
+Four screens, one persistent navigation. Every screen is server-rendered; a page reload is
 the normal way things update.
 
 ### 4.1 Overview
@@ -54,47 +54,46 @@ The landing screen. Answers "what do we have, and is collection healthy?"
 - **Active accounts by channel** — a payment channel and a count, a handful of rows.
 - **Newest accounts** — recent finds: channel, account number, holder name, bank, when first
   seen.
-- **Recent runs** — when, site, outcome, how many candidates found, how many new, a note.
-- **Recent alerts** — when, type, site, detail.
+- **Recent runs** — when, site, outcome, how many payees found, how many new, a note.
 
-### 4.2 Accounts
+### 4.2 Payees
 
-The working screen. A filterable table over everything collected.
+The working screen, and the one people live in. **One table holding two different kinds of
+payee**, because the question a reader brings is the same for both: who is receiving the
+deposits.
 
-- Filters: free-text search (matches number, holder, bank), channel, status
-  (any / active / gone / needs review). An export to CSV that respects the current filter.
-- Columns: channel · account number · holder name · bank · confidence · times seen · last
-  seen · status.
-- Account numbers are identifiers people copy into other systems. They need to be readable
-  digit-by-digit and easy to copy.
-- Row count is typically tens to low hundreds.
+- Most payees are an **account** — a number, de-duplicated across sightings, with a status
+  and a confidence.
+- Some are a **name only**. Certain payment routes never show a number; they hand off to the
+  provider's own checkout, which names a business instead, and that name changes on every
+  deposit request. These can never be de-duplicated, are never marked gone, and have no
+  confidence to report.
 
-### 4.3 Account detail
+Forcing those into one row shape means several cells have nothing to say. That is the
+central design problem of this screen: **absence has to read as "this kind of payee has no
+such thing", not as missing data.** A blank where a number belongs is the difference between
+"we failed to collect it" and "there is none to collect", and a reader must not have to
+guess which.
 
-Everything known about one account, and the proof.
+- Columns: channel · number · name · bank · confidence · times seen · last seen · status.
+- For a name-only payee, number, bank and confidence are all empty, and its status says so
+  rather than claiming it is active or gone.
+- Filters: free-text search (number, name, bank), channel, status
+  (any / active / gone / needs review). A status filter only makes sense for accounts.
+- **Paging**, with a per-page control (10 / 25 / 50 / 100, defaulting to 10) and a statement
+  of what is being shown out of how many. Filters survive paging. Export to CSV covers the
+  whole filtered set, not the page on screen — an analyst exports what they searched for.
+- Account numbers get copied into other systems. They need to be readable digit by digit and
+  easy to copy exactly.
+- **Last seen is an exact date and time**, not "9m ago". A case file has to state when.
+- Realistic size today is tens of rows; it grows into the thousands.
 
-- Header: the account number itself, its channel, its status.
-- Attributes: holder, bank, branch, operator, account type, confidence, first seen, last
-  seen.
-- **Seen on** — which sites advertised it, first/last seen per site, how many times. An
-  account appearing on several sites is the single most significant finding this tool
-  produces; the design should let that land.
-- **Observations** — every individual sighting: when, which run, the raw text as it appeared
-  on the page, which selector matched it, confidence.
-- **Evidence** — stored page captures and screenshots for those runs: run, kind, a SHA-256
-  digest, size, path. This is the audit trail; it should feel like one.
+### 4.3 Payee detail
 
-### 4.4 Merchants
+Everything known about one account, and the proof. (Name-only payees have no detail screen —
+there is nothing beyond the name and when it was seen.)
 
-Some payment routes never show an account number — they name a business instead, and the
-name changes on every request. These cannot be de-duplicated into accounts, so they
-accumulate as sightings and nothing is ever marked "gone".
-
-- Needs a short explanation of why this list behaves differently from Accounts.
-- Columns: merchant name · channel · which probe found it · times seen · first seen · last
-  seen.
-
-### 4.5 Runs
+### 4.4 Runs
 
 Where collection is started and watched. **This is the screen that most needs your
 attention.**
@@ -134,16 +133,12 @@ available to read.
 **History.** Past runs: id, when, site, outcome, candidates found, new accounts, evidence
 count, and an error note where relevant.
 
-### 4.6 Alerts
-
-A log of things worth a human's attention: when, type, site, related account, detail,
-whether it was delivered onward.
-
 ## 5. Vocabulary and states
 
 Design distinct treatments for these. Several appear as short status labels in tables.
 
-**Account status** — `active` · `gone` · `needs review`
+**Payee status** — `active` · `gone` · `needs review` for accounts, and a fourth that
+means "this payee is a name, not a number" for the name-only kind.
 
 **Confidence** — a value from 0 to 1, shown as a percentage. Roughly: 0.9+ came from a
 configured selector and is trustworthy; 0.6–0.9 was inferred from surrounding text; below
@@ -153,13 +148,12 @@ an automatic blocklist feed, so the distinction is consequential.
 **Run outcome** — `ok` · `partial` (ran, but something on the site had changed) · `failed` ·
 `blocked` (bot protection)
 
-**Alert types** — `new_account` · `account_disappeared` · `extractor_broken` · `flow_broken`
-· `probe_failed` · `site_down` · `site_blocked` · `auth_expired` · `auth_refreshed`
-
-Some of these are informational (`new_account`, `auth_refreshed`), some mean maintenance is
-due (`extractor_broken`, `flow_broken`), some mean collection is down (`site_down`,
-`site_blocked`). The design should let a reader sort them into those three groups without
-reading every word.
+**Alerts.** The system records events — a new payee, one that stopped appearing, a stale
+selector, a site that is down or blocking us, an expired login. They are deliberately **not
+a screen**: a list of them turned out to be noise nobody acted on. What survives is the note
+on a run and the state of the data itself. If you think there is a place for them, propose
+one, but the default is that a reader should not have to visit a log to know whether
+collection is healthy — the Overview and the Runs screen should already say.
 
 **Payment channels** — bKash · Nagad · Rocket · Upay · Tap · mCash · Bank transfer. These
 are distinct Bangladeshi services; users think in terms of them and scan for them
@@ -170,11 +164,16 @@ constantly. They deserve to be quickly distinguishable from one another.
 - **First run, nothing collected yet** — every screen is empty. An empty screen should say
   what belongs there and what to do to fill it, rather than showing a blank table.
 - **Filtered to nothing** — different from "nothing exists"; the way out is different too.
+- **A page past the end** — bookmarked, or the set shrank. It should land somewhere sensible
+  rather than looking like the filter matched nothing.
+- **One page of many** versus **everything fits on one page** — the paging controls should
+  not shout when there is nothing to page through.
 - **A run in progress**, including the waiting-for-sign-in case above.
 - **A long-running or stalled run.**
-- **Missing values.** Holder, bank, branch and operator are frequently unknown. Roughly half
-  the cells in a typical Accounts table are empty. Absence should be legible without
-  becoming visual noise.
+- **Missing values.** Holder, bank, branch and operator are frequently unknown, and a
+  name-only payee is missing several fields by definition. Roughly half the cells in a
+  typical Payees table are empty. Absence should be legible without becoming visual noise —
+  and, per §4.2, "unknown" and "not applicable" should not look identical.
 - **Long values.** Business names run to forty characters; digests and file paths are longer
   still. Tables need to cope without becoming unreadable.
 
@@ -196,17 +195,20 @@ constantly. They deserve to be quickly distinguishable from one another.
 
 ## 8. What to deliver
 
-1. The six screens at a realistic data density — with plausible content, not placeholder
+1. The four screens at a realistic data density — with plausible content, not placeholder
    text. Numbers look like `+8801XXXXXXXXX` (mobile wallets) or 13–17 digits (bank
-   accounts); holders are small-business names.
+   accounts); names are small-business names. The Payees table must show both kinds of payee
+   mixed together, since that is what a reader actually sees.
 2. The Runs screen in each of its states: idle, running, waiting for sign-in, finished,
    and with no history.
-3. At least one meaningful empty state and one filtered-to-nothing state.
+3. At least one meaningful empty state, one filtered-to-nothing state, and the paging
+   controls in both their "one page" and "many pages" forms.
 4. A component inventory: whatever recurring elements you settle on — status labels,
    channel indicators, confidence, tables, summary figures, section headings, the progress
    display, empty states, forms and actions.
 5. Brief notes on the reasoning where a choice is not self-evident, particularly around the
-   waiting-for-sign-in moment and how certainty is expressed.
+   waiting-for-sign-in moment, how certainty is expressed, and how a name-only payee reads
+   next to a numbered one.
 
 ## 9. Deliberately not specified
 
