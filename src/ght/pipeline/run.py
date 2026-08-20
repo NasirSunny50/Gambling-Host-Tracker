@@ -297,12 +297,12 @@ def run_site(
             # Recovery was tried and did not get us back in.
             message = (
                 f"Login session expired and sign-in did not recover it: {auto_login_note}. "
-                "Sign in by hand: python scripts/collect_1xbet.py --login"
+                "Run the collection again and complete the sign-in in the window it opens."
             )
         else:
             message = (
-                "Login session expired. Sign in by hand: "
-                "python scripts/collect_1xbet.py --login"
+                "Login session expired. Run the collection again and complete the "
+                "sign-in in the window it opens."
             )
         run.status = "failed"
         run.error = message

@@ -9,23 +9,22 @@ which account was advertised, on which site, at which time, with the page it cam
 stored and hashed as evidence.
 
 > **Scope.** The system never creates an account and never completes a payment. Some
-> deposit pages sit behind a login, so it can reuse a session a human captured by hand (no
-> credentials are stored), and reaching a few payees requires confirming a deposit, which
+> deposit pages sit behind a login, so a run opens a window for a person to sign in and then
+> reuses that session (no credentials are stored), and reaching a few payees requires
+> confirming a deposit, which
 > *initiates* a request the operator shows but which is never paid. Collected data includes
 > account holder names and numbers — treat it under the organisation's existing PII and AML
 > retention policy.
 
 ## Quick start (Windows)
 
-Double-click, in order:
+Double-click **`scripts\Start.bat`**. It sets up the environment on first use, starts the
+portal at `http://127.0.0.1:8000`, and opens it in your browser.
 
-1. **`Before Start.bat`** — opens a browser so you sign in yourself, then saves the session.
-   Run it again whenever a collection starts coming back empty (the session has expired).
-2. **`Start.bat`** — launches the portal at `http://127.0.0.1:8000` and opens it in your
-   browser. Trigger collections from the **Runs** page; keep the window open while you work.
+Collect from the **Runs** page. If the site needs a sign-in, a browser window opens for you
+— sign in there (solving the CAPTCHA yourself) and collection continues by itself.
 
-The first run of either sets up the environment automatically. Everything below is the
-manual equivalent for other platforms.
+Everything below is the manual equivalent for other platforms.
 
 ## Setup
 
@@ -51,7 +50,8 @@ For JavaScript-rendered sites, add the browser fetcher:
 1. **Recon first.** Open the deposit page and note where each number sits, what labels it,
    and whether it is rendered server-side or by JavaScript. Save the page into
    `tests/fixtures/html/` — that fixture is what keeps the extractor honest later.
-2. Copy `sources/demo-site.yaml` to `sources/<slug>.yaml` and fill in the URLs and blocks.
+2. Copy `tests/fixtures/demo-site.yaml` to `sources/<slug>.yaml` and fill in the URLs and
+   blocks.
    Each block pairs a channel with the element holding its number:
 
    ```yaml
@@ -75,7 +75,7 @@ redesign, the git history is the record of what the collector was looking for on
 
 ```bash
 ght sites                              # configured targets
-ght run --site demo-site --dry-run     # extract and print, write nothing
+ght run --site 1xbet-bd --dry-run      # extract and print, write nothing
 ght run                                # collect from every active site
 ght accounts --all --channel bkash     # what has been collected
 ght status                             # recent runs and their outcomes
@@ -88,12 +88,11 @@ ght serve                              # read-only web portal over the collected
 
 Some deposit pages sit behind a login and only reveal the payee after a multi-step flow
 (pick a method, confirm, follow a redirect or open a modal). Those are configured with a
-`browser` fetcher and per-method `probes`, and the session is captured by hand so no
-credentials ever live in the repo:
+`browser` fetcher and per-method `probes`. The session comes from the sign-in step at the
+start of a run, so no credentials ever live in the repo:
 
 ```bash
-python scripts/collect_1xbet.py --login   # opens a real browser; you sign in yourself
-python scripts/collect_1xbet.py           # then collects unattended, reusing the session
+ght run --site 1xbet-bd    # signs in if needed, then collects
 ```
 
 The saved session (`data/auth/…`) and everything under `data/` are gitignored. A probe
@@ -122,9 +121,9 @@ that can't be solved automatically. So login is **assisted**, not headless:
   completes the sign-in within a few minutes, the run reports the expiry and stops.
 
 > **This needs a desktop.** The assisted window has to appear on a screen the operator is
-> looking at, so run the portal on that machine (the Windows launchers do this). A headless
-> server can't show the window — there, refresh the session out-of-band with
-> `scripts/collect_1xbet.py --login` and let unattended runs reuse it.
+> looking at, so run the portal on that machine (`scripts\Start.bat` does this). A headless
+> server cannot show the window, so a session refreshed there has to be copied in from a
+> machine that can.
 
 > **Before production.** The portal has no authentication and binds to loopback
 > (`127.0.0.1`) on purpose. It must sit behind an authenticating reverse proxy before it is

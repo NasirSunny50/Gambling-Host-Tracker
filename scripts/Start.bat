@@ -1,24 +1,30 @@
 @echo off
-REM Starts the portal (and its backend). Keep this window open while you use it;
-REM close it or press Ctrl+C to stop. Trigger collections from the Runs page.
-title Host Tracker - Portal
+REM Double-click this to use the tracker.
+REM Opens the portal in your browser. Keep this window open while you work;
+REM close it (or press Ctrl+C) to stop.
+title Host Tracker
 cd /d "%~dp0.."
 
-call "scripts\_ensure-env.bat"
+call "scripts\internal\_ensure-env.bat"
 if errorlevel 1 ( echo. & pause & exit /b 1 )
 
 echo.
 echo ============================================================
-echo   Host Tracker  -  Portal
+echo   Host Tracker
 echo ============================================================
 echo Opening http://127.0.0.1:8000 in your browser.
+echo.
+echo On the Runs page, press "Run collection". If the site needs a
+echo sign-in, a browser window opens for you - sign in there and
+echo collection continues by itself.
+echo.
 echo Keep this window open. Close it (or press Ctrl+C) to stop.
 echo.
 
 REM Open the browser a few seconds later, once the server is up.
 start "" cmd /c "timeout /t 3 /nobreak >nul & start "" http://127.0.0.1:8000"
 
-".venv\Scripts\python.exe" scripts\serve.py
+".venv\Scripts\python.exe" scripts\internal\serve.py
 
 echo.
 echo Portal stopped.

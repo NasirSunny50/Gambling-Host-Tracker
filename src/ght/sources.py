@@ -170,11 +170,10 @@ class SourceConfig(_Strict):
     # Selector that marks the final page as ready, checked after the flow finishes.
     wait_for: str | None = None
     # Path to a Playwright storage_state JSON for sites whose deposit page needs a login.
-    # Produced either by a human signing in (scripts/collect_1xbet.py --login) or by the
-    # automated login below; no credentials live in config either way.
+    # Written by the sign-in step at the start of a run; no credentials live in config.
     auth_state: str | None = None
-    # How to sign in to refresh an expired session. Optional: without it, the only way to
-    # refresh the session is the hand-captured route (scripts/collect_1xbet.py --login).
+    # How to sign in to refresh an expired session. Without it, a run that finds the
+    # session dead can only report it.
     login: Login | None = None
     # Force a specific browser for the browser fetcher (msedge / chrome). Left unset, the
     # fetcher tries the bundled Chromium first and falls back to installed browsers.

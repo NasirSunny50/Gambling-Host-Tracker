@@ -1,7 +1,7 @@
 @echo off
 REM Make sure the project virtualenv exists with its dependencies installed.
 REM Idempotent: does the full setup only the first time, then returns instantly.
-cd /d "%~dp0.."
+cd /d "%~dp0..\.."
 
 if exist ".venv\Scripts\python.exe" goto :ok
 
