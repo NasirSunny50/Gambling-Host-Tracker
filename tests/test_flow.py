@@ -404,3 +404,55 @@ def test_urls_without_a_query_are_untouched():
     assert redact_url("https://bd.1xbet.com/en/office/recharge") == (
         "https://bd.1xbet.com/en/office/recharge"
     )
+
+
+# ------------------------------------------------------------- expired-session detection
+
+
+class LoggedOutPage:
+    """A page that never yields the payment frame — the logged-out case."""
+
+    url = "https://bd.1xbet.com/en/office/recharge"
+
+    def __init__(self, html):
+        self._html = html
+        self.frames = [self]  # only itself; no /paysystems frame ever appears
+        self.waited = 0
+
+    def content(self):
+        return self._html
+
+    def wait_for_timeout(self, ms):
+        self.waited += ms
+
+
+def test_target_bails_immediately_when_logged_out():
+    """A dead session must not burn the whole timeout waiting for a frame that won't come."""
+    fetcher = BrowserFetcher(frame="/paysystems/deposit", logged_out_marker="registration-layout")
+    page = LoggedOutPage("<div class='registration-layout-widget'>sign up</div>")
+    _target, error = fetcher._target(page)
+    assert error == "LOGGED_OUT"
+    # It bailed on the first content check, not after polling out the timeout.
+    assert page.waited == 0
+
+
+def test_target_still_finds_the_frame_when_logged_in():
+    class Frame:
+        url = "https://bd.1xbet.com/paysystems/deposit/?h_token=x"
+
+    class LoggedInPage:
+        def __init__(self):
+            self.frames = [self, Frame()]
+
+        url = "https://bd.1xbet.com/en/office/recharge"
+
+        def content(self):
+            return "<div>account</div>"
+
+        def wait_for_timeout(self, ms):
+            pass
+
+    fetcher = BrowserFetcher(frame="/paysystems/deposit", logged_out_marker="registration-layout")
+    target, error = fetcher._target(LoggedInPage())
+    assert error is None
+    assert target.url.endswith("h_token=x")

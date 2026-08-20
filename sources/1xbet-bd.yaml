@@ -20,6 +20,9 @@ frame: /paysystems/deposit
 # The account page loads its payment panel in an iframe that routinely takes >30s.
 timeout: 90
 
+# Present only when signed out; its appearance means the session must be refreshed.
+logged_out_marker: registration-layout-widget
+
 probes:
   # Each method reveals its payee only while its own modal is open, so each needs its
   # own visit. The markup differs per method - some print the number in a <b>, others

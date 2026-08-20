@@ -57,6 +57,7 @@ class BrowserFetcher:
         auth_state: str | None = None,
         channel: str | None = None,
         frame: str | None = None,
+        logged_out_marker: str | None = None,
     ) -> None:
         self.timeout = (timeout if timeout is not None else settings.request_timeout) * 1000
         # Optional selector to wait for, so we capture after the deposit panel renders
@@ -74,6 +75,8 @@ class BrowserFetcher:
         self._session_channel: str | None = None
         # URL substring of the iframe to work inside, when the deposit UI is embedded.
         self.frame = frame
+        # Substring that only appears while logged out, used to fail fast on a dead session.
+        self.logged_out_marker = logged_out_marker
 
     def _auth_kwargs(self) -> tuple[dict, str | None]:
         """Reuse a saved browser session when the deposit page sits behind a login.
@@ -169,9 +172,26 @@ class BrowserFetcher:
             for frame in page.frames:
                 if self.frame in frame.url:
                     return frame, None
+            # An expired login shows the logged-out page, where the frame will never come.
+            # Bail the moment that is visible rather than waiting out the whole timeout.
+            html = self._safe_content(page)
+            if self.logged_out_marker and html and self.logged_out_marker in html:
+                return page, "LOGGED_OUT"
             page.wait_for_timeout(step)
             waited += step
         return page, f"frame matching {self.frame!r} never appeared; captured the top page"
+
+    @staticmethod
+    def _safe_content(page) -> str | None:
+        """``page.content()`` but ``None`` while the page is mid-navigation.
+
+        A logged-out session redirects to the homepage, and content() raises during the
+        redirect. The caller treats ``None`` as "not settled yet" and keeps polling.
+        """
+        try:
+            return page.content()
+        except Exception:  # noqa: BLE001 - transient navigation; None means "not yet"
+            return None
 
     def _capture_target(self, page):
         """Re-resolve the document to capture, after the flow has run.

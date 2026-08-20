@@ -164,6 +164,10 @@ class SourceConfig(_Strict):
     timeout: int | None = None
     # Per-method probes. A source uses either these or the single flow/blocks pair above.
     probes: list[Probe] = Field(default_factory=list)
+    # Substring present only on the logged-out page. Its appearance means the saved session
+    # has expired, so the run stops fast with a clear message instead of timing out on
+    # every probe waiting for a deposit panel that will never load.
+    logged_out_marker: str | None = None
     ignore_numbers: list[str] = Field(default_factory=list)
     notes: str | None = None
 

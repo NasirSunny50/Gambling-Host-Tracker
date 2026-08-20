@@ -26,7 +26,7 @@
 
 {% macro alert_tag(kind) -%}
 {% set bad = ["site_down", "site_blocked", "probe_failed"] -%}
-{% set warn = ["extractor_broken", "flow_broken", "account_disappeared"] -%}
+{% set warn = ["extractor_broken", "flow_broken", "account_disappeared", "auth_expired"] -%}
 {% set k = "bad" if kind in bad else ("warn" if kind in warn else "ok") -%}
 {{ tag(kind | replace("_", " "), k) }}
 {%- endmacro %}

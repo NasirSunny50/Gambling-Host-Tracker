@@ -88,6 +88,7 @@ def _fetcher_kwargs(config: SourceConfig) -> dict:
         "auth_state": config.auth_state,
         "channel": config.browser_channel,
         "frame": config.frame,
+        "logged_out_marker": config.logged_out_marker,
     }
     if config.timeout is not None:
         kwargs["timeout"] = config.timeout
@@ -172,6 +173,7 @@ def run_site(session: Session, config: SourceConfig, dry_run: bool = False) -> R
 
     captures = []
     source_url: str | None = None
+    auth_expired = False
     for probe in probes_of(config):
         probe_config = config_for_probe(config, probe)
         probe_capture, probe_url = fetch_first_working_url(probe_config)
@@ -179,6 +181,12 @@ def run_site(session: Session, config: SourceConfig, dry_run: bool = False) -> R
         if source_url is None:
             # Which configured URL answered, recorded once from the first probe.
             source_url = probe_url
+        # A dead login lands every probe on the logged-out page. Detect it on the first
+        # probe and stop, rather than running all ten into the same wall.
+        marker = config.logged_out_marker
+        if marker and (probe_capture.flow_error == "LOGGED_OUT" or marker in probe_capture.text):
+            auth_expired = True
+            break
 
     # The first probe decides whether the site itself is reachable. A later probe failing
     # is a per-method problem and must not be reported as the site being down.
@@ -206,6 +214,21 @@ def run_site(session: Session, config: SourceConfig, dry_run: bool = False) -> R
         error=capture.error,
         flow_error=capture.flow_error,
     )
+
+    if auth_expired:
+        # The fetch itself succeeded (a 200 logged-out page), so this is neither site_down
+        # nor a stale selector. Name it for what it is and say how to fix it.
+        message = (
+            "Login session expired. Re-run: python scripts/collect_1xbet.py --login "
+            "The deposit page loaded logged out, so no payment methods were reachable."
+        )
+        run.status = "failed"
+        run.error = message
+        run.finished_at = utcnow()
+        report.status = "failed"
+        report.error = message
+        session.add(Alert(type="auth_expired", site_id=site.id, payload={"url": capture.url}))
+        return report
 
     if status != "ok":
         run.finished_at = utcnow()
