@@ -27,6 +27,31 @@ SECRET_QUERY_KEYS = frozenset(
 )
 
 
+def _detached(frame) -> bool:
+    """Whether a frame has been navigated away from and can no longer be read."""
+    try:
+        return bool(frame.is_detached())
+    except Exception:  # noqa: BLE001 - a frame that cannot answer is not usable either
+        return True
+
+
+def _read_html(target, page) -> tuple[str, str | None]:
+    """The captured document, falling back to the top page if the target went away.
+
+    A flow that navigates out of an iframe can leave the target unreadable by the time we
+    read it. The page we did land on is still the evidence for what happened, so capture
+    that rather than losing the whole probe.
+    """
+    try:
+        return target.content(), None
+    except Exception:  # noqa: BLE001, S110 - fall back to whatever document survived
+        pass  # the frame is gone; the page below is still evidence of where we ended up
+    try:
+        return page.content(), "captured the top page: the frame went away before it was read"
+    except Exception as exc:  # noqa: BLE001 - nothing readable at all
+        return "", f"page could not be read: {type(exc).__name__}"
+
+
 def redact_url(url: str) -> str:
     """Replace the value of any credential-bearing query parameter with REDACTED."""
     if not url or "?" not in url:
@@ -220,19 +245,37 @@ class BrowserFetcher:
         except Exception:  # noqa: BLE001 - transient navigation; None means "not yet"
             return None
 
-    def _capture_target(self, page):
+    def _capture_target(self, page, navigated: bool = False):
         """Re-resolve the document to capture, after the flow has run.
 
         The frame handle used for clicking does not survive the flow: confirming a deposit
         navigates the embedded app, which detaches the old frame, and the step may even
         move the whole tab to the provider's own page. So the target is looked up again,
         falling back to the top-level page when the frame is gone.
+
+        ``navigated`` says the flow took the whole tab somewhere else — the payee is on that
+        new page, so the embedded app is no longer what we came for even if a frame by that
+        name still exists on it.
         """
+        if navigated:
+            return page
         if self.frame:
             for frame in page.frames:
-                if self.frame in frame.url:
+                # A frame the flow navigated away from can linger in page.frames while being
+                # detached; reading from it throws. Only a live one is worth returning.
+                if self.frame in frame.url and not _detached(frame):
                     return frame
         return page
+
+    def _await_navigation(self, page, start_url: str, budget_ms: int = 6000) -> bool:
+        """Did the flow move the whole tab? Waits briefly, since navigation is async."""
+        waited = 0
+        while waited < budget_ms:
+            if (page.url or "") != start_url:
+                return True
+            page.wait_for_timeout(300)
+            waited += 300
+        return False
 
     def _settle(self, page, skip_wait_for: bool = False) -> str | None:
         """Wait for the finished page, without letting that wait discard the capture.
@@ -287,22 +330,30 @@ class BrowserFetcher:
                 response = page.goto(url, timeout=self.timeout, wait_until="domcontentloaded")
 
                 target, frame_error = self._target(page)
+                start_url = page.url
                 flow_error = None if frame_error else self._walk(target)
 
-                target = self._capture_target(page)
+                # A step can navigate the whole tab (confirming a deposit hands off to the
+                # provider's own checkout). That is asynchronous, so give it a moment to
+                # start before deciding which document we are capturing.
+                navigated = self._await_navigation(page, start_url)
+                target = self._capture_target(page, navigated=navigated)
                 settle_error = self._settle(
                     target, skip_wait_for=frame_error is not None or flow_error is not None
                 )
 
+                html, read_error = _read_html(target, page)
                 capture = RawCapture(
                     url=redact_url(target.url),
                     status_code=response.status if response else 0,
-                    html=target.content(),
+                    html=html,
                     screenshot=page.screenshot(full_page=True) if self.screenshot else None,
                     headers=dict(response.headers) if response else {},
                     fetcher=self.name,
                     fetched_at=datetime.now(UTC),
-                    flow_error=frame_error or flow_error or settle_error or auth_warning,
+                    flow_error=(
+                        frame_error or flow_error or settle_error or read_error or auth_warning
+                    ),
                 )
                 context.close()
                 browser.close()

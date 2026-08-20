@@ -496,3 +496,76 @@ def test_a_present_option_is_selected():
     page = SelectPage(["IFIC", "Other Bank"])
     assert fetcher._walk(page) is None
     assert page.selected == ["IFIC"]
+
+
+# ------------------------------------------- capturing after the flow leaves the frame
+
+
+class NavPage(FakePage):
+    """A page whose URL changes partway, as a confirm-and-redirect step does."""
+
+    def __init__(self, start, after=None, frames=()):
+        super().__init__()
+        self.url = start
+        self._after = after
+        self.frames = list(frames)
+
+    def wait_for_timeout(self, ms):
+        if self._after:
+            self.url = self._after
+            self._after = None
+
+
+class FakeFrame:
+    def __init__(self, url, detached=False):
+        self.url = url
+        self._detached = detached
+
+    def is_detached(self):
+        return self._detached
+
+
+def test_capture_follows_the_tab_when_the_flow_navigates_away():
+    """Confirming a deposit leaves the embedded app; the payee is on the page we land on."""
+    fetcher = BrowserFetcher(frame="/paysystems/deposit")
+    page = NavPage(
+        "https://site/office/recharge",
+        after="https://psp.example/check-out/abc",
+        frames=[FakeFrame("https://site/paysystems/deposit/?x")],
+    )
+    navigated = fetcher._await_navigation(page, "https://site/office/recharge")
+    assert navigated is True
+    # Even though a frame by that name is still listed, the tab moved: capture the page.
+    assert fetcher._capture_target(page, navigated=navigated) is page
+
+
+def test_capture_stays_in_the_frame_when_the_tab_did_not_move():
+    fetcher = BrowserFetcher(frame="/paysystems/deposit")
+    frame = FakeFrame("https://site/paysystems/deposit/?x")
+    page = NavPage("https://site/office/recharge", frames=[frame])
+    assert fetcher._await_navigation(page, page.url, budget_ms=600) is False
+    assert fetcher._capture_target(page, navigated=False) is frame
+
+
+def test_a_detached_frame_is_never_captured_from():
+    """A frame left behind by a navigation lingers in page.frames but cannot be read."""
+    fetcher = BrowserFetcher(frame="/paysystems/deposit")
+    dead = FakeFrame("https://site/paysystems/deposit/?x", detached=True)
+    page = NavPage("https://site/office/recharge", frames=[dead])
+    assert fetcher._capture_target(page, navigated=False) is page
+
+
+def test_unreadable_target_falls_back_to_the_page():
+    from ght.fetchers.browser import _read_html
+
+    class Dead:
+        def content(self):
+            raise RuntimeError("Frame was detached")
+
+    class Live:
+        def content(self):
+            return "<html>landed here</html>"
+
+    html, note = _read_html(Dead(), Live())
+    assert "landed here" in html
+    assert "frame went away" in note
