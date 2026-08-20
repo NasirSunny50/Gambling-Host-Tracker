@@ -14,7 +14,7 @@ from ght.sources import Block, SourceConfig, load_source
 from ght.types import CONFIDENCE_HIGH
 
 FIXTURES = Path(__file__).parent / "fixtures" / "html"
-SOURCES = Path(__file__).parents[1] / "sources"
+SOURCES = Path(__file__).parent / "fixtures"  # demo-site is a test fixture, not a live source
 
 
 @pytest.fixture(scope="module")
