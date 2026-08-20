@@ -144,22 +144,15 @@ class BrowserFetcher:
         Raises the collected failures as one error when none of them do, so the run report
         names every browser that was tried instead of only the first.
         """
+        from ght.browserlaunch import open_browser
+
         # A session is tied to the browser that made it, so prefer that one.
         preferred = self.channel or self._session_channel
-        channels = (preferred,) if preferred else self.BROWSER_CHANNELS
-        failures = []
-        for candidate in channels:
-            try:
-                kwargs = {"channel": candidate} if candidate else {}
-                browser = playwright.chromium.launch(headless=True, **kwargs)
-                # Remember which browser actually started, so a session saved from this
-                # launch can be pinned to it on replay.
-                self._used_channel = candidate
-                return browser
-            except Exception as exc:  # noqa: BLE001 - trying the next browser is the point
-                label = candidate or "bundled chromium"
-                failures.append(f"{label} ({str(exc).splitlines()[0]})")
-        raise RuntimeError("no usable browser: " + "; ".join(failures))
+        browser, identity = open_browser(playwright, headed=False, preferred=preferred)
+        # Remember which browser actually started, so a session saved from this launch can
+        # be pinned to it on replay.
+        self._used_channel = identity
+        return browser
 
     def _target(self, page) -> tuple[object, str | None]:
         """The document the flow and the capture belong to.

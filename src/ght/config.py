@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -17,6 +18,11 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./data/ght.db"
     evidence_dir: Path = REPO_ROOT / "data" / "evidence"
     sources_dir: Path = REPO_ROOT / "sources"
+
+    # Browser to open for collection and login: a Playwright channel (msedge, chrome)
+    # or a full path to any Chromium build (e.g. Brave). Empty = auto (bundled, then
+    # installed). Set via GHT_BROWSER_PATH so login opens in the browser you use.
+    browser_path: str = Field("", validation_alias="GHT_BROWSER_PATH")
 
     request_timeout: int = 30
     max_retries: int = 3

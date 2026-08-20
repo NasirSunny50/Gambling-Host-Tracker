@@ -29,9 +29,6 @@ from ght.sources import SourceConfig
 # solve a CAPTCHA, receive a 2FA code, and click through.
 ASSISTED_WAIT_SECONDS = 300
 
-# Browsers to try, in order, when opening a window. Playwright's bundled Chromium first,
-# then the ones already installed — security software often blocks the bundled build.
-BROWSER_CHANNELS = (None, "msedge", "chrome")
 
 
 @dataclass(frozen=True)
@@ -62,17 +59,10 @@ def _visible(page, selector: str) -> bool:
 
 
 def _launch(playwright, channel: str | None, headed: bool):
-    """Open a browser, trying each channel until one starts. Returns (browser, channel)."""
-    channels = (channel,) if channel else BROWSER_CHANNELS
-    failures = []
-    for candidate in channels:
-        try:
-            kwargs = {"channel": candidate} if candidate else {}
-            browser = playwright.chromium.launch(headless=not headed, **kwargs)
-            return browser, candidate
-        except Exception as exc:  # noqa: BLE001 - trying the next browser is the point
-            failures.append(f"{candidate or 'bundled chromium'} ({str(exc).splitlines()[0]})")
-    raise RuntimeError("no usable browser: " + "; ".join(failures))
+    """Open a browser via the shared resolver. Returns (browser, identity)."""
+    from ght.browserlaunch import open_browser
+
+    return open_browser(playwright, headed=headed, preferred=channel)
 
 
 def perform_login(config: SourceConfig, username: str = "", password: str = "") -> LoginResult:
