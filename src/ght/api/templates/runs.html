@@ -5,73 +5,129 @@
 {% block body %}
 
 <div class="head"><h1>Runs</h1></div>
-<p class="sub">Launch a collection and watch how each fetch turned out.</p>
+<p class="sub">Collect the payment accounts a site is currently advertising.</p>
 
-{{ ui.section("Collect now") }}
 {% if job_running %}
-  <div class="callout warn">
-    <strong>Collecting {{ job.current.slug }}…</strong> started {{ job.current.started_at | age }}.
-    This drives a real browser through every payment method, so it takes a few minutes.
-    This page refreshes on its own.
-    {% if job_log %}<div class="logbox">{% for line in job_log %}{{ line }}
-{% endfor %}</div>{% endif %}
+  {# ---------- live progress ---------- #}
+  {% set waiting = "sign in" in (job.current.message | lower) %}
+  <div class="panel live {{ 'live--waiting' if waiting }}">
+    <div class="live-head">
+      <span class="live-dot"></span>
+      <strong>{{ job.current.message }}</strong>
+      {% if job.current.step and job.current.total %}
+        <span class="tag tag-neutral">{{ job.current.step }} of {{ job.current.total }}</span>
+      {% endif %}
+      <span style="margin-left:auto" class="mute">{{ job.current.slug }} · started {{ job.current.started_at | age }}</span>
+    </div>
+
+    {% if waiting %}
+      <div class="live-cta">
+        A browser window is open — sign in there (solve the CAPTCHA yourself). Collection
+        continues by itself the moment you are in.
+      </div>
+    {% endif %}
+
+    <ol class="steps">
+      {% for p in job.current.phases %}
+        <li class="step step--{{ p.state }}">
+          <span class="step-mark">{{ "✓" if p.state == "done" else ("●" if p.state == "active" else "") }}</span>
+          <span class="step-label">{{ p.label }}</span>
+          {% if p.state == "active" and job.current.step and job.current.total %}
+            <span class="step-bar"><span style="width: {{ (job.current.step / job.current.total * 100) | round(0) | int }}%"></span></span>
+          {% endif %}
+        </li>
+      {% endfor %}
+    </ol>
+    <p class="mute" style="margin:12px 0 0; font-size:12.5px">This page updates itself.</p>
   </div>
+
 {% else %}
+  {# ---------- idle: start a run ---------- #}
   {% if job.current %}
-  <div class="callout {{ '' if job.current.returncode == 0 else 'warn' }}">
-    Last collection of <strong>{{ job.current.slug }}</strong> finished {{ job.current.finished_at | age }} —
-    {{ ui.tag("completed", "ok") if job.current.returncode == 0 else ui.tag("exited " ~ job.current.returncode, "bad") }}.
-    {% if job_log %}<div class="logbox">{% for line in job_log %}{{ line }}
+    {% set ok = job.current.returncode == 0 %}
+    <div class="callout {{ '' if ok else 'warn' }}">
+      Last collection of <strong>{{ job.current.slug }}</strong> {{ job.current.finished_at | age }} —
+      {{ ui.tag("finished", "ok") if ok else ui.tag("stopped", "bad") }}
+      {{ job.current.message }}
+      {% if job_log %}<div class="logbox">{% for line in job_log %}{{ line }}
 {% endfor %}</div>{% endif %}
-  </div>
+    </div>
   {% endif %}
 
-  <form class="toolbar" method="post" action="/runs" onsubmit="return confirmRun(this)">
-    <select name="slug" id="run-slug">
-      {% for s in runnable %}
-        <option value="{{ s.slug }}" data-orders="{{ s.order_probes | join(', ') }}">
-          {{ s.slug }} — {{ s.name }}{{ " (draft)" if s.status != "active" }}
-        </option>
-      {% endfor %}
-    </select>
-    <button class="btn-primary" type="submit">Run collection</button>
+  <form method="post" action="/runs" class="start-card" onsubmit="return confirmRun(this)">
+    <div>
+      <label class="mute" style="font-size:12px; display:block; margin-bottom:5px">Site</label>
+      <select name="slug" id="run-slug">
+        {% for s in runnable %}
+          <option value="{{ s.slug }}" data-orders="{{ s.order_probes | join(', ') }}">
+            {{ s.name }}{{ " (draft)" if s.status != "active" }}
+          </option>
+        {% endfor %}
+      </select>
+    </div>
+    <button class="btn-primary btn-lg" type="submit">Run collection</button>
+    <p class="start-note mute">
+      Signs you in to the site first (a window opens if needed), then reads every payment
+      method and saves what it finds. Takes a few minutes.
+    </p>
   </form>
-  {% set order_sites = runnable | selectattr("order_probes") | list %}
-  {% if order_sites %}
-  <p class="sub mute" style="margin-top:-6px">
-    Heads-up: some methods reveal the payee only by confirming a deposit, which initiates a
-    request on the operator — no money moves and nothing is paid. You'll be asked to confirm.
-  </p>
-  {% endif %}
-  <p class="sub mute" style="margin-top:-2px">
-    If the site's login has expired, a browser window opens for you to sign in (solve the
-    CAPTCHA yourself); collection continues automatically once you're in. This needs a
-    desktop — run it from the machine you're sitting at, not a headless server.
-  </p>
 {% endif %}
 
 {{ ui.section("History", count=rows | length) }}
-{% call ui.table(["#", "Started", "Site", "Fetcher", "Status", "#HTTP", "#Found", "#New", "#Evidence", "Note"]) %}
+{% call ui.table(["#", "Started", "Site", "Status", "#Found", "#New", "#Evidence", "Note"]) %}
   {% for r in rows %}
   <tr>
     <td class="num mute">{{ r.id }}</td>
     <td class="dim">{{ r.started_at | age }}</td>
     <td>{{ sites[r.site_id].slug if r.site_id in sites else r.site_id }}</td>
-    <td class="dim">{{ r.fetcher }}</td>
     <td>{{ ui.tag(r.status, "ok" if r.status == "ok" else ("warn" if r.status == "partial" else "bad")) }}</td>
-    <td class="num dim">{{ r.http_status or "—" }}</td>
     <td class="num">{{ r.candidates_found }}</td>
     <td class="num">{{ r.accounts_new }}</td>
     <td class="num dim">{{ evidence_counts.get(r.id, 0) }}</td>
-    <td class="dim">{{ (r.error or "—")[:60] }}</td>
+    <td class="dim">{{ (r.error or "—")[:70] }}</td>
   </tr>
   {% else %}
-  <tr><td colspan="10">{{ ui.empty("No runs yet", "Use “Run collection” above to fetch the configured deposit pages for the first time.") }}</td></tr>
+  <tr><td colspan="8">{{ ui.empty("No runs yet", "Use “Run collection” above to fetch this site for the first time.") }}</td></tr>
   {% endfor %}
 {% endcall %}
 
+<style>
+  .start-card { display:flex; align-items:flex-end; gap:14px; flex-wrap:wrap;
+                background:var(--surface); border:1px solid var(--border);
+                border-radius:var(--radius); padding:20px; box-shadow:var(--shadow); }
+  .start-card select { min-width:240px; }
+  .btn-lg { height:44px; padding:0 22px; font-size:15px; }
+  .start-note { flex-basis:100%; margin:2px 0 0; font-size:12.5px; }
+
+  .live { padding:20px; border-left:3px solid var(--accent); }
+  .live--waiting { border-left-color:var(--warn); }
+  .live-head { display:flex; align-items:center; gap:10px; flex-wrap:wrap; font-size:15px; }
+  .live-dot { width:10px; height:10px; border-radius:50%; background:var(--accent);
+              animation:pulse 1.4s ease-in-out infinite; flex:none; }
+  .live--waiting .live-dot { background:var(--warn); }
+  .live-cta { margin-top:12px; padding:12px 14px; border-radius:var(--radius-sm);
+              background:var(--warn-bg); border:1px solid var(--warn-bd); color:var(--text); }
+
+  .steps { list-style:none; margin:18px 0 0; padding:0; display:flex; flex-direction:column; gap:2px; }
+  .step { display:flex; align-items:center; gap:11px; padding:9px 11px; border-radius:var(--radius-sm); }
+  .step-mark { width:20px; height:20px; flex:none; border-radius:50%; font-size:11px;
+               display:inline-flex; align-items:center; justify-content:center;
+               border:1px solid var(--border); color:var(--mute); }
+  .step-label { color:var(--dim); }
+  .step--done .step-mark { color:var(--ok); border-color:var(--ok-bd); background:var(--ok-bg); }
+  .step--done .step-label { color:var(--text); }
+  .step--active { background:var(--surface-2); }
+  .step--active .step-mark { color:var(--accent); border-color:var(--accent); background:var(--accent-weak); }
+  .step--active .step-label { color:var(--text); font-weight:600; }
+  .step--stopped .step-mark { color:var(--bad); border-color:var(--bad-bd); background:var(--bad-bg); }
+  .step-bar { flex:1; height:5px; border-radius:3px; background:var(--border);
+              overflow:hidden; margin-left:6px; max-width:260px; }
+  .step-bar span { display:block; height:100%; background:var(--accent); border-radius:3px;
+                   transition:width .3s ease; }
+</style>
+
 <script>
-  // Confirm before a run that initiates a deposit request, and only then.
+  // Only warn when the chosen site has a method that initiates a deposit request.
   function confirmRun(form) {
     var opt = form.querySelector("#run-slug").selectedOptions[0];
     var orders = (opt.getAttribute("data-orders") || "").trim();

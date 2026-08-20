@@ -58,64 +58,113 @@ def test_perform_login_needs_an_auth_state_path():
     assert result.reason == "config"
 
 
-def test_recover_login_reasons(monkeypatch):
+def test_sign_in_reasons(monkeypatch):
     """The note the run reports is derived from the login result's reason."""
     from ght.auth_login import LoginResult
     from ght.pipeline import run as runmod
 
     config = _login_config()
 
-    monkeypatch.setattr("ght.auth_login.perform_login", lambda c, *a: LoginResult(True, "ok"))
-    ok, note = runmod._try_recover_login(config)
+    monkeypatch.setattr(
+        "ght.auth_login.perform_login",
+        lambda c, *a, **k: LoginResult(True, "ok", "signed in through the login window"),
+    )
+    ok, note = runmod._sign_in(config)
     assert ok is True and "login window" in note
 
-    monkeypatch.setattr("ght.auth_login.perform_login", lambda c, *a: LoginResult(False, "timeout"))
-    ok, note = runmod._try_recover_login(config)
+    monkeypatch.setattr(
+        "ght.auth_login.perform_login", lambda c, *a, **k: LoginResult(False, "timeout")
+    )
+    ok, note = runmod._sign_in(config)
     assert ok is False and "not completed in time" in note
 
     plain = SourceConfig(slug="s", name="s", fetcher="browser")
-    ok, note = runmod._try_recover_login(plain)
+    ok, note = runmod._sign_in(plain)
     assert ok is False and "no login flow" in note
 
 
-def test_run_site_retries_after_recovering_login(session, monkeypatch):
+def test_run_signs_in_before_collecting(session, monkeypatch):
+    """Sign-in happens up front, not after every probe has already failed."""
     from ght.pipeline import run as runmod
     from ght.types import RawCapture
 
-    expired = RawCapture(url="https://x/office", status_code=200, html="registration-widget")
-    failed = RawCapture(url="https://x/office", status_code=0, error="stop here")
+    order = []
+    capture = RawCapture(url="https://x/office", status_code=0, error="stop here")
 
-    calls = {"n": 0}
+    def sign_in_stub(config, on_progress=None):
+        order.append("signin")
+        return True, "signed in through the login window"
 
-    def collect_stub(config):
-        calls["n"] += 1
-        if calls["n"] == 1:
-            return [("p", "c", expired)], "https://x", True
-        return [("p", "c", failed)], "https://x", False  # recovered, then bail out cheaply
+    def collect_stub(config, on_progress=None):
+        order.append("collect")
+        return [("p", "c", capture)], "https://x", False
 
+    monkeypatch.setattr(runmod, "_sign_in", sign_in_stub)
     monkeypatch.setattr(runmod, "_collect_captures", collect_stub)
-    monkeypatch.setattr(runmod, "_try_recover_login", lambda c: (True, "signed in"))
 
     runmod.run_site(session, _login_config())
-    assert calls["n"] == 2
+
+    assert order == ["signin", "collect"]
     assert "auth_refreshed" in {a.type for a in session.scalars(select(Alert))}
 
 
-def test_run_site_reports_when_recovery_fails(session, monkeypatch):
+def test_a_dry_run_does_not_open_a_sign_in_window(session, monkeypatch):
+    """A dry run must stay side-effect-free, and a login window is very much a side effect."""
     from ght.pipeline import run as runmod
     from ght.types import RawCapture
 
-    expired = RawCapture(url="https://x/office", status_code=200, html="registration-widget")
+    called = {"signin": False}
+    capture = RawCapture(url="https://x/office", status_code=0, error="stop here")
+
+    def sign_in_stub(config, on_progress=None):
+        called["signin"] = True
+        return True, "signed in"
+
+    monkeypatch.setattr(runmod, "_sign_in", sign_in_stub)
     monkeypatch.setattr(
-        runmod, "_collect_captures", lambda config: ([("p", "c", expired)], "u", True)
+        runmod, "_collect_captures", lambda c, on_progress=None: ([("p", "c", capture)], "u", False)
+    )
+
+    runmod.run_site(session, _login_config(), dry_run=True)
+    assert called["signin"] is False
+
+
+def test_run_reports_when_sign_in_did_not_take(session, monkeypatch):
+    """Signing in can appear to work and still leave us logged out; say so plainly."""
+    from ght.pipeline import run as runmod
+    from ght.types import RawCapture
+
+    expired = RawCapture(url="https://x/en/user/login", status_code=200, html="<form>")
+    monkeypatch.setattr(
+        runmod,
+        "_sign_in",
+        lambda c, on_progress=None: (False, "the sign-in window was not completed in time"),
     )
     monkeypatch.setattr(
-        runmod, "_try_recover_login", lambda c: (False, "the sign-in window was not completed in time")
+        runmod, "_collect_captures", lambda c, on_progress=None: ([("p", "c", expired)], "u", True)
     )
 
     report = runmod.run_site(session, _login_config())
     assert report.status == "failed"
     assert "did not recover" in report.error
+
+
+def test_progress_updates_are_emitted(session, monkeypatch):
+    """The portal renders these, so a run must announce each phase it enters."""
+    from ght.pipeline import run as runmod
+    from ght.types import RawCapture
+
+    capture = RawCapture(url="https://x/office", status_code=0, error="stop here")
+    monkeypatch.setattr(runmod, "_sign_in", lambda c, on_progress=None: (True, "signed in"))
+    monkeypatch.setattr(
+        runmod, "_collect_captures", lambda c, on_progress=None: ([("p", "c", capture)], "u", False)
+    )
+
+    seen = []
+    runmod.run_site(session, _login_config(), on_progress=seen.append)
+
+    assert "signin" in {u.phase for u in seen}
+    assert any("sign-in" in u.message or "signed in" in u.message.lower() for u in seen)
 
 
 def test_logged_out_detected_by_login_redirect():
@@ -139,3 +188,67 @@ def test_logged_out_detected_by_body_marker():
     config = _login_config()  # marker "registration-widget"
     hit = RawCapture(url="https://x/", status_code=200, html="...registration-widget...")
     assert _looks_logged_out(config, hit) is True
+
+
+def test_saved_session_is_restored_into_the_check_context(tmp_path):
+    """The session check is meaningless unless it actually carries the saved cookies."""
+    import json
+
+    from ght.auth_login import _restore_context
+
+    state = tmp_path / "auth.json"
+    state.write_text(
+        json.dumps(
+            {
+                "storage_state": {"cookies": [{"name": "SESSION"}], "origins": []},
+                "user_agent": "Mozilla/5.0 TestAgent",
+                "channel": "msedge",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    captured = {}
+
+    class FakeBrowser:
+        def new_context(self, **kwargs):
+            captured.update(kwargs)
+            return "context"
+
+    _restore_context(FakeBrowser(), str(state))
+    assert captured["storage_state"]["cookies"] == [{"name": "SESSION"}]
+    # The session's own UA must win: Cloudflare ties its clearance cookie to it.
+    assert captured["user_agent"] == "Mozilla/5.0 TestAgent"
+
+
+def test_a_bare_playwright_state_is_also_restored(tmp_path):
+    import json
+
+    from ght.auth_login import _restore_context
+
+    state = tmp_path / "auth.json"
+    state.write_text(json.dumps({"cookies": [], "origins": []}), encoding="utf-8")
+
+    captured = {}
+
+    class FakeBrowser:
+        def new_context(self, **kwargs):
+            captured.update(kwargs)
+            return "context"
+
+    _restore_context(FakeBrowser(), str(state))
+    assert captured["storage_state"] == {"cookies": [], "origins": []}
+
+
+def test_a_missing_session_file_leaves_the_context_clean(tmp_path):
+    from ght.auth_login import _restore_context
+
+    captured = {}
+
+    class FakeBrowser:
+        def new_context(self, **kwargs):
+            captured.update(kwargs)
+            return "context"
+
+    _restore_context(FakeBrowser(), str(tmp_path / "nope.json"))
+    assert "storage_state" not in captured

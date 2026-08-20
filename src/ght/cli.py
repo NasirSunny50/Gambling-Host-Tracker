@@ -56,8 +56,15 @@ def list_sites() -> None:
 def run(
     site: str | None = typer.Option(None, "--site", "-s", help="Slug; omit to run all sites."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Extract and print, write nothing."),
+    progress: bool = typer.Option(
+        False, "--progress", help="Emit machine-readable step updates (used by the portal)."
+    ),
 ) -> None:
     """Collect from one site or from every active site."""
+    from ght.progress import emit_to_stdout
+
+    on_progress = emit_to_stdout if progress else None
+
     if site:
         configs = [load_source(site)]
     else:
@@ -68,7 +75,7 @@ def run(
 
     for config in configs:
         with session_scope() as session:
-            report = run_site(session, config, dry_run=dry_run)
+            report = run_site(session, config, dry_run=dry_run, on_progress=on_progress)
 
             colour = {"ok": "green", "partial": "yellow"}.get(report.status, "red")
             console.print(

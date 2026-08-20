@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from ght.config import REPO_ROOT
+from ght.progress import PHASES, parse_line
 
 
 @dataclass
@@ -27,10 +28,33 @@ class RunInfo:
     started_at: datetime
     finished_at: datetime | None = None
     returncode: int | None = None
+    # Live state, updated from the subprocess as it works. The portal renders this as a
+    # checklist so an operator can see which step is running - and, when it pauses, that it
+    # is waiting for them to sign in rather than hung.
+    phase: str = ""
+    message: str = "Starting…"
+    step: int | None = None
+    total: int | None = None
 
     @property
     def running(self) -> bool:
         return self.finished_at is None
+
+    @property
+    def phases(self) -> list[dict]:
+        """Every phase with its state, in order, for rendering as a checklist."""
+        order = [name for name, _ in PHASES]
+        current = order.index(self.phase) if self.phase in order else -1
+        out = []
+        for index, (name, label) in enumerate(PHASES):
+            if not self.running and self.returncode == 0 or index < current:
+                state = "done"
+            elif index == current:
+                state = "active" if self.running else "stopped"
+            else:
+                state = "pending"
+            out.append({"name": name, "label": label, "state": state})
+        return out
 
 
 class RunManager:
@@ -59,7 +83,7 @@ class RunManager:
             # Run the package as a module so it uses the same interpreter and installed
             # environment as the portal, rather than depending on a console script on PATH.
             self._proc = subprocess.Popen(
-                [sys.executable, "-m", "ght.cli", "run", "--site", slug],
+                [sys.executable, "-m", "ght.cli", "run", "--site", slug, "--progress"],
                 cwd=str(REPO_ROOT),
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
@@ -73,14 +97,24 @@ class RunManager:
     def _watch(self, proc: subprocess.Popen, info: RunInfo) -> None:
         """Drain output and record completion. Runs on its own thread."""
         if proc.stdout is not None:
-            for line in proc.stdout:
-                line = line.rstrip()
-                if line:
-                    self._log_tail.append(line)
-                    del self._log_tail[:-40]  # keep only the last 40 lines
+            for raw in proc.stdout:
+                line = raw.rstrip()
+                if not line:
+                    continue
+                update = parse_line(line)
+                if update is not None:
+                    # A progress line drives the checklist and is not shown as raw output.
+                    info.phase = update.phase
+                    info.message = update.message
+                    info.step = update.step
+                    info.total = update.total
+                    continue
+                self._log_tail.append(line)
+                del self._log_tail[:-40]  # keep only the last 40 lines
         proc.wait()
         info.returncode = proc.returncode
         info.finished_at = datetime.now(UTC)
+        info.message = "Finished" if proc.returncode == 0 else "Stopped before finishing"
 
     @property
     def log_tail(self) -> list[str]:

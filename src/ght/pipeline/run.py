@@ -21,6 +21,8 @@ from ght.models import (
 from ght.pipeline.changeset import ChangeSet, compute_changeset, refresh_active_flags
 from ght.pipeline.dedup import record_observations
 from ght.pipeline.evidence import store_capture
+from ght.progress import ProgressFn
+from ght.progress import report as emit_progress
 from ght.sources import Probe, SourceConfig
 from ght.types import RawCapture
 
@@ -182,7 +184,9 @@ def _looks_logged_out(config: SourceConfig, capture: RawCapture) -> bool:
     return bool(url_marker and url_marker in (capture.url or ""))
 
 
-def _collect_captures(config: SourceConfig) -> tuple[list, str | None, bool]:
+def _collect_captures(
+    config: SourceConfig, on_progress: ProgressFn | None = None
+) -> tuple[list, str | None, bool]:
     """Fetch every probe, stopping early if a dead login lands them on the logged-out page.
 
     Returns the captures, the configured URL that answered, and whether the session looked
@@ -192,7 +196,10 @@ def _collect_captures(config: SourceConfig) -> tuple[list, str | None, bool]:
     captures = []
     source_url: str | None = None
     auth_expired = False
-    for probe in probes_of(config):
+    probes = probes_of(config)
+    total = len(probes)
+    for index, probe in enumerate(probes, start=1):
+        emit_progress(on_progress, "collect", f"Reading {probe.name}", step=index, total=total)
         probe_config = config_for_probe(config, probe)
         probe_capture, probe_url = fetch_first_working_url(probe_config)
         captures.append((probe, probe_config, probe_capture))
@@ -200,25 +207,27 @@ def _collect_captures(config: SourceConfig) -> tuple[list, str | None, bool]:
             source_url = probe_url
         if _looks_logged_out(config, probe_capture):
             auth_expired = True
+            emit_progress(on_progress, "collect", "The site signed us out", step=index, total=total)
             break
     return captures, source_url, auth_expired
 
 
-def _try_recover_login(config: SourceConfig) -> tuple[bool, str]:
-    """Refresh an expired session by signing in, then report whether it worked.
+def _sign_in(config: SourceConfig, on_progress: ProgressFn | None = None) -> tuple[bool, str]:
+    """Establish a live session before collecting, and report whether it worked.
 
-    For a site with bot protection this opens a visible browser and waits for the operator
-    to complete the sign-in (solving the CAPTCHA themselves); the collection continues once
-    they are in. No credentials are stored — the person types them into the window.
+    A run starts here rather than discovering halfway through that the session died. If the
+    site still recognises us it redirects away from the login page and this returns almost
+    immediately; otherwise a window waits for the operator to sign in (solving the CAPTCHA
+    themselves). No credentials are stored - the person types them into the window.
     """
     if config.login is None:
         return False, "no login flow is configured"
 
     from ght.auth_login import perform_login
 
-    result = perform_login(config)
+    result = perform_login(config, on_progress=on_progress)
     if result.ok:
-        return True, "signed in through the login window"
+        return True, result.detail or "signed in"
     if result.reason == "timeout":
         return False, "the sign-in window was not completed in time"
     if result.reason == "challenge":
@@ -226,22 +235,33 @@ def _try_recover_login(config: SourceConfig) -> tuple[bool, str]:
     return False, f"sign-in failed: {result.detail or result.reason}"
 
 
-def run_site(session: Session, config: SourceConfig, dry_run: bool = False) -> RunReport:
-    """Fetch, extract, and persist one site's deposit accounts."""
+def run_site(
+    session: Session,
+    config: SourceConfig,
+    dry_run: bool = False,
+    on_progress: ProgressFn | None = None,
+) -> RunReport:
+    """Sign in, fetch, extract, and persist one site's deposit accounts."""
     site = sync_site(session, config)
 
-    captures, source_url, auth_expired = _collect_captures(config)
-
-    # Self-heal an expired login from stored credentials, then collect again once. A dry
-    # run stays side-effect-free, so it reports the expiry instead of signing in.
+    # Sign in before collecting rather than after failing. When the session is still good
+    # this costs a couple of seconds; when it is not, the operator deals with it once, up
+    # front, instead of watching every probe fail. A dry run stays side-effect-free.
     auto_login_note = ""
-    if auth_expired and not dry_run:
-        recovered, auto_login_note = _try_recover_login(config)
-        if recovered:
+    if config.login is not None and not dry_run:
+        emit_progress(on_progress, "signin", "Checking the site sign-in")
+        signed_in, auto_login_note = _sign_in(config, on_progress)
+        emit_progress(
+            on_progress,
+            "signin",
+            auto_login_note if signed_in else f"Could not sign in: {auto_login_note}",
+        )
+        if signed_in:
             session.add(
                 Alert(type="auth_refreshed", site_id=site.id, payload={"note": auto_login_note})
             )
-            captures, source_url, auth_expired = _collect_captures(config)
+
+    captures, source_url, auth_expired = _collect_captures(config, on_progress)
 
     # The first probe decides whether the site itself is reachable. A later probe failing
     # is a per-method problem and must not be reported as the site being down.
@@ -307,6 +327,7 @@ def run_site(session: Session, config: SourceConfig, dry_run: bool = False) -> R
         )
         return report
 
+    emit_progress(on_progress, "store", "Saving accounts and evidence")
     result = ExtractionResult()
     merged: dict[tuple[str, str, str], object] = {}
     # A run only proves an account is gone if every probe that could have shown it ran.
