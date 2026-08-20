@@ -167,10 +167,13 @@ def _capture_status(capture: RawCapture) -> str:
     return "ok"
 
 
-def run_site(session: Session, config: SourceConfig, dry_run: bool = False) -> RunReport:
-    """Fetch, extract, and persist one site's deposit accounts."""
-    site = sync_site(session, config)
+def _collect_captures(config: SourceConfig) -> tuple[list, str | None, bool]:
+    """Fetch every probe, stopping early if a dead login lands them on the logged-out page.
 
+    Returns the captures, the configured URL that answered, and whether the session looked
+    expired. A dead login lands every probe on the same wall, so detecting it on the first
+    probe and stopping avoids running all ten into it.
+    """
     captures = []
     source_url: str | None = None
     auth_expired = False
@@ -179,14 +182,63 @@ def run_site(session: Session, config: SourceConfig, dry_run: bool = False) -> R
         probe_capture, probe_url = fetch_first_working_url(probe_config)
         captures.append((probe, probe_config, probe_capture))
         if source_url is None:
-            # Which configured URL answered, recorded once from the first probe.
             source_url = probe_url
-        # A dead login lands every probe on the logged-out page. Detect it on the first
-        # probe and stop, rather than running all ten into the same wall.
         marker = config.logged_out_marker
         if marker and (probe_capture.flow_error == "LOGGED_OUT" or marker in probe_capture.text):
             auth_expired = True
             break
+    return captures, source_url, auth_expired
+
+
+def _try_auto_login(session: Session, config: SourceConfig) -> tuple[bool, str]:
+    """Refresh an expired session from stored credentials. Returns (recovered, note).
+
+    This is the headless self-heal: rather than failing a scheduled or portal-triggered run
+    and telling a human to sign in, use the site's stored credentials to sign in and carry
+    on. It still cannot pass a CAPTCHA or 2FA — if one appears the note says so and the run
+    falls back to reporting the expired session.
+    """
+    from ght import crypto
+    from ght.auth_login import perform_login
+    from ght.credentials import get_credentials
+
+    if config.login is None:
+        return False, "no login flow is configured for automatic sign-in"
+    if not crypto.is_configured():
+        return False, "GHT_SECRET_KEY is not set, so stored credentials cannot be used"
+    try:
+        creds = get_credentials(session, config.slug)
+    except Exception as exc:  # noqa: BLE001 - a key problem is a reported result
+        return False, f"stored credentials could not be read: {exc}"
+    if creds is None:
+        return False, "no stored credentials to sign in with"
+
+    result = perform_login(config, *creds)
+    if result.ok:
+        return True, "signed in automatically with the stored credentials"
+    if result.reason == "challenge":
+        return False, "automatic sign-in hit a CAPTCHA or 2FA; capture the session by hand"
+    if result.reason == "bad_credentials":
+        return False, "the stored credentials were rejected at sign-in"
+    return False, f"automatic sign-in failed: {result.detail or result.reason}"
+
+
+def run_site(session: Session, config: SourceConfig, dry_run: bool = False) -> RunReport:
+    """Fetch, extract, and persist one site's deposit accounts."""
+    site = sync_site(session, config)
+
+    captures, source_url, auth_expired = _collect_captures(config)
+
+    # Self-heal an expired login from stored credentials, then collect again once. A dry
+    # run stays side-effect-free, so it reports the expiry instead of signing in.
+    auto_login_note = ""
+    if auth_expired and not dry_run:
+        recovered, auto_login_note = _try_auto_login(session, config)
+        if recovered:
+            session.add(
+                Alert(type="auth_refreshed", site_id=site.id, payload={"note": auto_login_note})
+            )
+            captures, source_url, auth_expired = _collect_captures(config)
 
     # The first probe decides whether the site itself is reachable. A later probe failing
     # is a per-method problem and must not be reported as the site being down.
@@ -218,10 +270,19 @@ def run_site(session: Session, config: SourceConfig, dry_run: bool = False) -> R
     if auth_expired:
         # The fetch itself succeeded (a 200 logged-out page), so this is neither site_down
         # nor a stale selector. Name it for what it is and say how to fix it.
-        message = (
-            "Login session expired. Re-run: python scripts/collect_1xbet.py --login "
-            "The deposit page loaded logged out, so no payment methods were reachable."
-        )
+        if auto_login_note:
+            # Auto-recovery was tried and did not get us back in.
+            message = (
+                f"Login session expired and automatic sign-in did not recover it: "
+                f"{auto_login_note}. Capture the session by hand: "
+                "python scripts/collect_1xbet.py --login"
+            )
+        else:
+            message = (
+                "Login session expired. Store credentials on the Sites page for automatic "
+                "sign-in, or capture the session by hand: "
+                "python scripts/collect_1xbet.py --login"
+            )
         run.status = "failed"
         run.error = message
         run.finished_at = utcnow()

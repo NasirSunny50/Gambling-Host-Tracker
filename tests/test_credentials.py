@@ -131,3 +131,93 @@ def test_login_manager_gate_and_alert(monkeypatch):
     assert "CAPTCHA" in info.message
     # The LoginResult reason vocabulary stays stable for the alert mapping.
     assert LoginResult(False, "challenge").reason == "challenge"
+
+
+# ------------------------------------------------------ auto-login on session expiry
+
+
+def _login_config():
+    from ght.sources import Login, SourceConfig
+
+    return SourceConfig(
+        slug="1xbet-bd",
+        name="x",
+        fetcher="browser",
+        logged_out_marker="registration-widget",
+        auth_state="data/auth/x.json",
+        login=Login(url="u", username="#u", password="#p", submit="#s", success=".ok"),
+    )
+
+
+def test_try_auto_login_paths(key, session, monkeypatch):
+    from ght.auth_login import LoginResult
+    from ght.pipeline import run as runmod
+    from ght.sources import SourceConfig
+
+    # No login block -> not attempted.
+    plain = SourceConfig(slug="s", name="s", fetcher="browser")
+    ok, note = runmod._try_auto_login(session, plain)
+    assert ok is False and "no login flow" in note
+
+    config = _login_config()
+
+    # Login configured but no credentials stored.
+    ok, note = runmod._try_auto_login(session, config)
+    assert ok is False and "no stored credentials" in note
+
+    creds.set_credentials(session, "1xbet-bd", "user", "pass")
+
+    # A CAPTCHA aborts recovery with a clear note.
+    monkeypatch.setattr("ght.auth_login.perform_login", lambda c, u, p: LoginResult(False, "challenge"))
+    ok, note = runmod._try_auto_login(session, config)
+    assert ok is False and "CAPTCHA" in note
+
+    # A clean sign-in recovers.
+    monkeypatch.setattr("ght.auth_login.perform_login", lambda c, u, p: LoginResult(True, "ok"))
+    ok, note = runmod._try_auto_login(session, config)
+    assert ok is True
+
+
+def test_run_site_retries_collection_after_auto_login(key, session, monkeypatch):
+    from sqlalchemy import select as _select
+
+    from ght.models import Alert
+    from ght.pipeline import run as runmod
+    from ght.types import RawCapture
+
+    expired = RawCapture(url="https://x/office", status_code=200, html="registration-widget")
+    failed = RawCapture(url="https://x/office", status_code=0, error="stop here")
+
+    calls = {"n": 0}
+
+    def collect_stub(config):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return [("p", "c", expired)], "https://x", True  # expired the first time
+        return [("p", "c", failed)], "https://x", False  # recovered, then bail out cheaply
+
+    monkeypatch.setattr(runmod, "_collect_captures", collect_stub)
+    monkeypatch.setattr(runmod, "_try_auto_login", lambda s, c: (True, "signed in"))
+
+    report = runmod.run_site(session, _login_config())
+
+    assert calls["n"] == 2  # collected again after the auto-login
+    types = {a.type for a in session.scalars(_select(Alert))}
+    assert "auth_refreshed" in types
+    assert report.status != "failed" or report.error != ""  # ran past the expiry wall
+
+
+def test_run_site_reports_when_auto_login_cannot_recover(key, session, monkeypatch):
+    from ght.pipeline import run as runmod
+    from ght.types import RawCapture
+
+    expired = RawCapture(url="https://x/office", status_code=200, html="registration-widget")
+    monkeypatch.setattr(runmod, "_collect_captures", lambda config: ([("p", "c", expired)], "u", True))
+    monkeypatch.setattr(
+        runmod, "_try_auto_login", lambda s, c: (False, "hit a CAPTCHA or 2FA")
+    )
+
+    report = runmod.run_site(session, _login_config())
+    assert report.status == "failed"
+    assert "automatic sign-in did not recover" in report.error
+    assert "CAPTCHA" in report.error

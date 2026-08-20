@@ -119,9 +119,12 @@ session, so collection doesn't depend on a hand-captured session.
 - Each site needs a `login:` block in its source config (form selectors + a success marker).
   The **Log in** button fills the stored credentials and saves the session the collector
   reuses.
-- **CAPTCHA / 2FA is not solved.** If a challenge appears, login aborts and raises a
-  `login_challenge` alert; refresh that site's session by hand instead
-  (`scripts/collect_1xbet.py --login`).
+- **Automatic recovery.** If a run finds the session expired, it signs in from the stored
+  credentials and collects again in the same run — no manual step. It raises an
+  `auth_refreshed` alert when it self-heals.
+- **CAPTCHA / 2FA is not solved.** If a challenge appears during login (manual or
+  automatic), it aborts and raises a `login_challenge` alert; refresh that site's session by
+  hand instead (`scripts/collect_1xbet.py --login`).
 
 > **Before production.** The portal has no authentication and binds to loopback
 > (`127.0.0.1`) on purpose. Once it stores credentials and can trigger logins, it must sit
