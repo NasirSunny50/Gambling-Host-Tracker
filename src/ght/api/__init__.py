@@ -19,4 +19,10 @@ def create_app():
 
     app = FastAPI(title="Gambling Host Tracker", docs_url="/api/docs")
     app.include_router(router)
+
+    # Pick a saved schedule back up. Done here rather than on import so that anything
+    # importing the routes - a test, a script - does not quietly start collecting.
+    from ght.api.routes import scheduler
+
+    scheduler.resume()
     return app

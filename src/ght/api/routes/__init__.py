@@ -27,6 +27,7 @@ from sqlalchemy.orm import Session
 
 from ght.api import TEMPLATES_DIR
 from ght.api.jobs import manager
+from ght.api.schedule import MIN_MINUTES, Scheduler
 from ght.config import settings
 from ght.db import SessionLocal
 from ght.models import (
@@ -124,6 +125,10 @@ templates.env.filters["channel"] = lambda value: CHANNEL_LABELS.get(value, value
 # The base layout shows a live "collecting…" flag on every page, so the manager is a
 # template global rather than something each route has to remember to pass.
 templates.env.globals["job"] = manager
+
+# One scheduler for the process, over the same manager the button drives, so a timed
+# collection and a hand-started one cannot both be in flight.
+scheduler = Scheduler(manager)
 
 
 # How the newest run's outcome reads in the header. There is no alerts page: whether
@@ -680,6 +685,10 @@ def runs(request: Request, session: Session = Depends(get_session)):
             "elapsed": _elapsed(shown) if shown else "",
             "finished": finished,
             "last_run": last_run,
+            "schedule": scheduler.state,
+            "schedule_seconds": scheduler.seconds_until_next,
+            "schedule_per_day": scheduler.runs_per_day,
+            "schedule_min_minutes": MIN_MINUTES,
             # While a run is in flight the page reloads itself so progress is visible
             # without the analyst hammering refresh.
             "auto_refresh": manager.is_running,
@@ -706,6 +715,36 @@ def start_run(request: Request, slug: str = Form(...), session: Session = Depend
 
     started, message = manager.start(slug)
     _log(session, request, "run", {"slug": slug, "started": started, "message": message}, None)
+    return RedirectResponse("/runs", status_code=303)
+
+
+@router.post("/schedule")
+def start_schedule(
+    request: Request,
+    slug: str = Form(...),
+    minutes: int = Form(...),
+    session: Session = Depends(get_session),
+):
+    """Put a site on an interval. Only known slugs, same as starting one by hand."""
+    if slug not in {s["slug"] for s in _runnable_sites()}:
+        return RedirectResponse("/runs", status_code=303)
+
+    started, message = scheduler.start(slug, minutes)
+    _log(
+        session,
+        request,
+        "run",
+        {"schedule": "start", "slug": slug, "minutes": minutes, "started": started,
+         "message": message},
+        None,
+    )
+    return RedirectResponse("/runs", status_code=303)
+
+
+@router.post("/schedule/stop")
+def stop_schedule(request: Request, session: Session = Depends(get_session)):
+    scheduler.stop()
+    _log(session, request, "run", {"schedule": "stop"}, None)
     return RedirectResponse("/runs", status_code=303)
 
 

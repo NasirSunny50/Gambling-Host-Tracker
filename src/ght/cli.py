@@ -61,9 +61,22 @@ def run(
     ),
 ) -> None:
     """Collect from one site or from every active site."""
+    from ght.api.jobs import claim_run_lock, release_run_lock
     from ght.progress import emit_to_stdout
 
     on_progress = emit_to_stdout if progress else None
+
+    # One collection on the machine at a time. Two of them race on the same login session
+    # and double the traffic to a site that is already watching for it. This matters more
+    # now that the portal can collect on a schedule: the other one may be a run nobody is
+    # sitting in front of. A dry run reads and writes nothing, so it is not gated.
+    held = None if dry_run else claim_run_lock(site or "all sites")
+    if held is not None:
+        console.print(
+            f"[yellow]another collection is already running[/yellow] "
+            f"({held.get('slug', 'unknown')}, process {held.get('pid')})"
+        )
+        raise typer.Exit(1)
 
     if site:
         configs = [load_source(site)]
@@ -73,6 +86,14 @@ def run(
         _report_broken(broken)
         configs = [c for c in all_configs if c.status == "active"]
 
+    try:
+        _collect(configs, dry_run=dry_run, on_progress=on_progress)
+    finally:
+        if not dry_run:
+            release_run_lock()
+
+
+def _collect(configs, dry_run: bool, on_progress) -> None:
     for config in configs:
         with session_scope() as session:
             report = run_site(session, config, dry_run=dry_run, on_progress=on_progress)

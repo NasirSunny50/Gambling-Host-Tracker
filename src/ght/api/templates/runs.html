@@ -114,6 +114,84 @@
   </form>
 {% endif %}
 
+{# The schedule stands apart from the manual card and stays visible in every state: it is
+   a standing arrangement rather than an action, and the one thing you want to find when a
+   run appears that you did not start. #}
+{% if schedule.enabled %}
+<section class="panel sched sched--on">
+  <div class="sched-head">
+    <span class="sched-badge"><span class="dot"></span>Scheduled</span>
+    <h2>Every {{ schedule.minutes }} minutes &middot;
+        <span class="mono dim">{{ schedule.slug }}</span></h2>
+    <form method="post" action="/schedule/stop" class="sched-stop">
+      <button type="submit" class="btn">Stop schedule</button>
+    </form>
+  </div>
+
+  <div class="sched-body">
+    <div class="countdown">
+      <span class="countdown-k">Next collection in</span>
+      <strong id="sched-countdown" class="countdown-n"
+              data-seconds="{{ schedule_seconds if schedule_seconds is not none else '' }}">
+        {%- if schedule_seconds is not none -%}
+          {{ "%d:%02d" | format(schedule_seconds // 60, schedule_seconds % 60) }}
+        {%- else -%}&mdash;{%- endif -%}
+      </strong>
+    </div>
+    <dl class="sched-facts">
+      <div><dt>Started collecting</dt>
+        <dd class="mono">{{ schedule.last_started | stamp if schedule.last_started else "not yet" }}</dd></div>
+      <div><dt>Works out to</dt><dd>{{ schedule_per_day }} collections a day</dd></div>
+    </dl>
+  </div>
+
+  {% if schedule.last_note %}
+  <div class="callout info sched-note">
+    <span class="lead" aria-hidden="true">&#9432;</span><span>{{ schedule.last_note }}</span>
+  </div>
+  {% endif %}
+</section>
+
+{% else %}
+<section class="panel sched">
+  <h2 class="sched-title">Run on a schedule</h2>
+  <p class="sched-why">Collect on its own in the background, without anyone here. The
+     numbers rotate through the day, so a schedule catches the ones a person would miss.</p>
+
+  <form method="post" action="/schedule" class="sched-form">
+    <div class="field">
+      <label class="field-label" for="sched-slug">Site</label>
+      <select name="slug" id="sched-slug">
+        {% for s in runnable %}
+          <option value="{{ s.slug }}">{{ s.name }}{{ " (draft)" if s.status != "active" }}</option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div class="field">
+      <label class="field-label" for="sched-minutes">How often</label>
+      <div class="every">
+        {# Presets first, because almost nobody wants a number nobody else wants; the box
+           is there for the one who does. #}
+        <div class="presets">
+          {% for label, mins in [("15 min", 15), ("30 min", 30), ("1 hour", 60), ("3 hours", 180), ("6 hours", 360)] %}
+            <button type="button" class="preset" data-minutes="{{ mins }}">{{ label }}</button>
+          {% endfor %}
+        </div>
+        <div class="custom">
+          <input type="number" id="sched-minutes" name="minutes" value="60"
+                 min="{{ schedule_min_minutes }}" max="1440" step="1" required>
+          <span class="unit">minutes</span>
+        </div>
+      </div>
+      <p class="field-note" id="sched-estimate"></p>
+    </div>
+
+    <button class="btn-primary btn-lg" type="submit">&#9201; Start schedule</button>
+  </form>
+</section>
+{% endif %}
+
 <section class="panel" style="margin-top:20px">
   <h2>Run history</h2>
   {% call ui.table(["Started", "Site", "Outcome", "#Found", "#New", "#Pages saved", "Note"]) %}
@@ -188,6 +266,43 @@
   /* The note carries the reason a run was not complete, so it gets room to be read
      rather than being cut at seventy characters. */
   .note { white-space:normal; min-width:260px; max-width:420px; font-size:12.5px; }
+  /* ---- schedule ---- */
+  .sched { max-width:760px; margin-bottom:20px; padding:22px 24px; }
+  .sched--on { border-color:var(--accent); }
+  .sched-title { margin:0 0 6px; font-size:16px; font-weight:700; }
+  .sched-why { margin:0 0 20px; color:var(--text-2); font-size:13px; max-width:60ch; }
+  .sched-form { display:flex; flex-direction:column; gap:18px; align-items:flex-start; }
+  .field { width:100%; }
+  .field select { min-width:280px; }
+  .field-note { margin:8px 0 0; font-size:12.5px; color:var(--text-3); min-height:1.2em; }
+  .every { display:flex; align-items:center; gap:14px; flex-wrap:wrap; }
+  .presets { display:flex; gap:6px; flex-wrap:wrap; }
+  .preset { height:34px; padding:0 12px; font-size:12.5px; font-weight:600;
+            background:var(--surface-2); color:var(--text-2); }
+  .preset.on { border-color:var(--accent); background:var(--accent-weak); color:var(--accent); }
+  .custom { display:inline-flex; align-items:center; gap:8px; }
+  .custom input { width:84px; text-align:right; font-family:var(--mono); }
+  .custom .unit { font-size:12.5px; color:var(--text-3); }
+
+  .sched-head { display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+  .sched-head h2 { margin:0; font-size:16px; font-weight:700; }
+  .sched-stop { margin-left:auto; }
+  .sched-badge { display:inline-flex; align-items:center; gap:7px; padding:3px 10px;
+                 border-radius:999px; font-size:12px; font-weight:700; color:var(--accent);
+                 background:var(--accent-weak); }
+  .sched-badge .dot { width:7px; height:7px; border-radius:999px; background:var(--accent);
+                      animation:htpulse 1.8s infinite; }
+  .sched-body { display:flex; align-items:center; gap:32px; flex-wrap:wrap; margin-top:20px; }
+  .countdown { display:flex; flex-direction:column; gap:2px; }
+  .countdown-k { font-size:12px; color:var(--text-2); text-transform:uppercase;
+                 letter-spacing:.4px; font-weight:600; }
+  .countdown-n { font-size:32px; font-weight:750; font-family:var(--mono);
+                 letter-spacing:-.5px; line-height:1.1; }
+  .sched-facts { display:flex; gap:28px; margin:0; flex-wrap:wrap; }
+  .sched-facts dt { font-size:12px; color:var(--text-3); margin-bottom:2px; }
+  .sched-facts dd { margin:0; font-size:13px; font-weight:600; }
+  .sched-note { margin:18px 0 0; font-size:12.5px; }
+
   .quiet-empty { padding:32px 20px; color:var(--text-2); text-align:center; font-size:13px;
                  max-width:520px; margin:0 auto; }
 </style>
@@ -195,6 +310,55 @@
 <script>
   // A run drives a real browser against a live site for a couple of minutes and cannot be
   // taken back once it starts, so it does not begin on a single stray click.
+
+  // ---- schedule: presets, the per-day estimate, and the countdown ----
+  (function () {
+    var box = document.getElementById("sched-minutes");
+    if (box) {
+      var estimate = document.getElementById("sched-estimate");
+      var presets = [].slice.call(document.querySelectorAll(".preset"));
+      function paint() {
+        var mins = parseInt(box.value, 10);
+        presets.forEach(function (b) {
+          b.classList.toggle("on", parseInt(b.getAttribute("data-minutes"), 10) === mins);
+        });
+        // The same fact said the way it will be felt: "every 15 minutes" and "96 runs a
+        // day against a live site" are one choice, and only the second one is obvious.
+        if (!estimate) return;
+        estimate.textContent = mins > 0
+          ? "About " + Math.floor((24 * 60) / mins) + " collections a day."
+          : "";
+      }
+      presets.forEach(function (b) {
+        b.addEventListener("click", function () {
+          box.value = b.getAttribute("data-minutes");
+          paint();
+        });
+      });
+      box.addEventListener("input", paint);
+      paint();
+    }
+
+    var clock = document.getElementById("sched-countdown");
+    if (!clock) return;
+    var left = parseInt(clock.getAttribute("data-seconds"), 10);
+    if (isNaN(left)) return;
+    function pad(n) { return String(n).padStart(2, "0"); }
+    setInterval(function () {
+      left -= 1;
+      if (left <= 0) {
+        clock.textContent = "now";
+        // Come back once the run has had a moment to start, so the page shows it working
+        // rather than a countdown stuck on zero.
+        setTimeout(function () { window.location.reload(); }, 4000);
+        left = 99999;
+        return;
+      }
+      var m = Math.floor(left / 60);
+      clock.textContent = m + ":" + pad(left % 60);
+    }, 1000);
+  })();
+
   function confirmRun(form) {
     var opt = form.querySelector("#run-slug").selectedOptions[0];
     var site = opt ? opt.textContent.trim() : "this site";

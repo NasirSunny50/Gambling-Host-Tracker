@@ -241,7 +241,17 @@ def in_flight(**kw):
     return SimpleNamespace(**{**fields, **kw})
 
 
+def schedule(**kw):
+    fields = {"enabled": False, "slug": "", "minutes": 0, "next_due": None,
+              "last_started": None, "last_note": ""}
+    return SimpleNamespace(**{**fields, **kw})
+
+
 RUNS_BASE = {
+    "schedule": schedule(),
+    "schedule_seconds": None,
+    "schedule_per_day": 0,
+    "schedule_min_minutes": 5,
     "rows": [run_row()],
     "sites": SITES,
     "evidence_counts": {7: 16},
@@ -418,3 +428,61 @@ def test_a_name_only_payee_says_when_no_picture_was_kept():
         screenshot=None,
     )
     assert "No screenshot was captured" in html
+
+
+# ------------------------------------------------------------------ the schedule
+
+
+def test_the_schedule_offers_intervals_before_it_is_set():
+    html = render("runs.html", job=job(), job_running=False, waiting=False, seconds_left=None,
+                  phases=[], **RUNS_BASE)
+    assert "Run on a schedule" in html
+    assert 'data-minutes="60"' in html
+    assert 'action="/schedule"' in html
+
+
+def test_a_live_schedule_says_when_the_next_one_lands():
+    """The question someone opens this page to answer is "is it still running, and when
+    next" — so the countdown is the headline, not a setting to be read back."""
+    html = render(
+        "runs.html",
+        job=job(), job_running=False, waiting=False, seconds_left=None, phases=[],
+        **{**RUNS_BASE,
+           "schedule": schedule(enabled=True, slug="demo-site", minutes=30, last_started=NOW),
+           "schedule_seconds": 754,
+           "schedule_per_day": 48},
+    )
+    assert "Every 30 minutes" in html
+    assert "12:34" in html  # 754 seconds
+    assert "48 collections a day" in html
+    assert 'action="/schedule/stop"' in html
+    # Setting it again is not offered while it is set: stop is the way out.
+    assert 'class="sched-form"' not in html
+
+
+def test_a_skipped_tick_says_why():
+    """A schedule that silently does nothing is indistinguishable from one that is off."""
+    html = render(
+        "runs.html",
+        job=job(), job_running=False, waiting=False, seconds_left=None, phases=[],
+        **{**RUNS_BASE,
+           "schedule": schedule(enabled=True, slug="demo-site", minutes=15,
+                                last_note="skipped — the previous collection was still running"),
+           "schedule_seconds": 60,
+           "schedule_per_day": 96},
+    )
+    assert "still running" in html
+
+
+def test_the_schedule_is_visible_while_a_collection_is_in_flight():
+    """It is the first thing you look for when a run appears that you did not start."""
+    html = render(
+        "runs.html",
+        job=job(True, in_flight()), job_running=True, waiting=False, seconds_left=None,
+        phases=phases(["done", "active", "pending"]),
+        **{**RUNS_BASE,
+           "schedule": schedule(enabled=True, slug="demo-site", minutes=30),
+           "schedule_seconds": 120, "schedule_per_day": 48},
+    )
+    assert "Run in progress" in html
+    assert "Every 30 minutes" in html

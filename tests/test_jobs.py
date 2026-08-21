@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+import pytest
+
 from ght.api.jobs import RunManager
 
 
@@ -20,8 +22,17 @@ class DummyProc:
         return 0
 
 
-def test_a_run_reports_started_and_records_it(monkeypatch):
-    manager = RunManager()
+@pytest.fixture
+def manager(tmp_path):
+    """A manager whose cross-process lock lives in the test's own directory.
+
+    Without this the lock is the repo's real one: a test that leaves a run "in flight"
+    holds it under this very pid, and every test after it is refused.
+    """
+    return RunManager(lock_path=tmp_path / "run.lock")
+
+
+def test_a_run_reports_started_and_records_it(monkeypatch, manager):
     monkeypatch.setattr("ght.api.jobs.subprocess.Popen", lambda *a, **k: DummyProc())
     started, message = manager.start("1xbet-bd")
     assert started is True
@@ -30,8 +41,7 @@ def test_a_run_reports_started_and_records_it(monkeypatch):
     assert manager.current.slug == "1xbet-bd"
 
 
-def test_a_second_run_is_refused_while_one_is_active(monkeypatch):
-    manager = RunManager()
+def test_a_second_run_is_refused_while_one_is_active(monkeypatch, manager):
 
     class NeverEnds:
         returncode = None
@@ -51,8 +61,7 @@ def test_a_second_run_is_refused_while_one_is_active(monkeypatch):
     assert "already running" in message
 
 
-def test_output_is_captured_as_a_bounded_tail(monkeypatch):
-    manager = RunManager()
+def test_output_is_captured_as_a_bounded_tail(monkeypatch, manager):
 
     class Chatty:
         returncode = 0
@@ -114,13 +123,12 @@ def test_a_clean_run_still_reads_as_done_throughout():
     assert info.failed is False
 
 
-def test_a_reported_failure_survives_a_clean_exit_code(monkeypatch):
+def test_a_reported_failure_survives_a_clean_exit_code(monkeypatch, manager):
     """End to end through the watcher: the failure arrives as a progress line, the process
     then exits 0, and the manager must not overwrite it with "Finished"."""
     import json
     import time
 
-    from ght.api.jobs import RunManager
     from ght.progress import MARKER, Update
 
     class Failing:
@@ -138,7 +146,6 @@ def test_a_reported_failure_survives_a_clean_exit_code(monkeypatch):
         def wait(self):
             return 0
 
-    manager = RunManager()
     monkeypatch.setattr("ght.api.jobs.subprocess.Popen", lambda *a, **k: Failing())
     manager.start("1xbet-bd")
     for _ in range(50):
@@ -148,3 +155,90 @@ def test_a_reported_failure_survives_a_clean_exit_code(monkeypatch):
     assert manager.current.failed is True
     assert manager.current.message == "The saved session was not valid"
     assert [p["state"] for p in manager.current.phases] == ["stopped", "pending", "pending"]
+
+
+# ------------------------------------------------- one collection on the machine, not per portal
+
+
+def test_a_collection_started_by_another_portal_blocks_this_one(tmp_path):
+    """Observed for real: two portals, both resuming the same saved schedule, two
+    collections walking one login session at once. The gate has to hold across processes,
+    not just within one."""
+    import json
+    import os
+    from datetime import UTC, datetime
+
+    from ght.api.jobs import RunManager
+
+    lock = tmp_path / "run.lock"
+    lock.write_text(
+        json.dumps({"pid": os.getpid(), "slug": "someone-else", "started_at": datetime.now(UTC).isoformat()}),
+        encoding="utf-8",
+    )
+
+    manager = RunManager(lock_path=lock)
+    started, message = manager.start("1xbet-bd")
+    assert started is False
+    assert "another collection" in message
+    assert "someone-else" in message
+
+
+def test_a_lock_left_behind_by_a_dead_process_does_not_block_forever(tmp_path):
+    """A crash must not stop the tool collecting until someone finds a file they have
+    never heard of."""
+    import json
+    from datetime import UTC, datetime
+
+    from ght.api.jobs import _lock_holder
+
+    lock = tmp_path / "run.lock"
+    # A pid that cannot be running: process 0 is never a real user process.
+    lock.write_text(
+        json.dumps({"pid": 0, "slug": "crashed", "started_at": datetime.now(UTC).isoformat()}),
+        encoding="utf-8",
+    )
+
+    assert _lock_holder(lock) is None
+    assert not lock.exists()
+
+
+def test_a_lock_older_than_any_real_collection_is_stale(tmp_path):
+    import json
+    import os
+    from datetime import UTC, datetime, timedelta
+
+    from ght.api.jobs import _lock_holder
+
+    lock = tmp_path / "run.lock"
+    long_ago = (datetime.now(UTC) - timedelta(hours=4)).isoformat()
+    lock.write_text(
+        json.dumps({"pid": os.getpid(), "slug": "forgotten", "started_at": long_ago}),
+        encoding="utf-8",
+    )
+
+    assert _lock_holder(lock) is None
+
+
+def test_an_unreadable_lock_is_not_treated_as_held(tmp_path):
+    from ght.api.jobs import _lock_holder
+
+    lock = tmp_path / "run.lock"
+    lock.write_text("not json at all", encoding="utf-8")
+    assert _lock_holder(lock) is None
+
+
+def test_the_collector_takes_the_lock_and_gives_it_back(tmp_path):
+    """The collector holds it, not the portal: a run started from a terminal has to be
+    visible to a schedule firing on its own, and only the collector knows about both."""
+    from ght.api.jobs import claim_run_lock, release_run_lock
+
+    lock = tmp_path / "run.lock"
+    assert claim_run_lock("1xbet-bd", lock) is None
+    assert lock.exists()
+
+    # A second collection, from anywhere, is told who has it.
+    held = claim_run_lock("1xbet-bd", lock)
+    assert held is not None and held["slug"] == "1xbet-bd"
+
+    release_run_lock(lock)
+    assert claim_run_lock("1xbet-bd", lock) is None
