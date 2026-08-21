@@ -235,7 +235,7 @@ RUNS_BASE = {
     "rows": [run_row()],
     "sites": SITES,
     "evidence_counts": {7: 16},
-    "runnable": [{"slug": "demo-site", "name": "Demo Site", "status": "active", "order_probes": []}],
+    "runnable": [{"slug": "demo-site", "name": "Demo Site", "status": "active"}],
     "job_log": [],
     "last_run": None,
     "elapsed": "1m 30s",

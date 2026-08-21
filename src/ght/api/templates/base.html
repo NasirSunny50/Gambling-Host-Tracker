@@ -5,6 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   {% if auto_refresh %}<meta http-equiv="refresh" content="5">{% endif %}
   <title>{% block title %}Host Tracker{% endblock %}</title>
+  {# The sidebar's mark, redrawn in solid shapes and inlined so the tab icon needs no
+     second request and works on a machine with no network. Solid rather than stroked:
+     a tab renders this at sixteen pixels, where the sidebar's hairlines turn to mud.
+     Colours are literal too - the CSS variables do not exist inside a favicon. #}
+  <link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20viewBox%3D%270%200%2032%2032%27%3E%3Crect%20width%3D%2732%27%20height%3D%2732%27%20rx%3D%277%27%20fill%3D%27%232f6fed%27%2F%3E%3Cg%20transform%3D%27translate%284%204%29%27%3E%3Cpath%20d%3D%27M12%202l8%203.2v5.3c0%204.9-3.3%208.5-8%2010.1-4.7-1.6-8-5.2-8-10.1V5.2L12%202z%27%20fill%3D%27%23fff%27%2F%3E%3Ccircle%20cx%3D%2712%27%20cy%3D%2710.6%27%20r%3D%274.3%27%20fill%3D%27%232f6fed%27%2F%3E%3Ccircle%20cx%3D%2712%27%20cy%3D%2710.6%27%20r%3D%271.9%27%20fill%3D%27%23fff%27%2F%3E%3C%2Fg%3E%3C%2Fsvg%3E">
   <script>
     // Read the stored theme before first paint, so a dark-mode operator never sees a
     // white flash on navigation. Inline on purpose: nothing else may load first.

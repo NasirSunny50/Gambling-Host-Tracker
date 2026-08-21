@@ -539,21 +539,17 @@ def account_detail(account_id: int, request: Request, session: Session = Depends
 
 
 def _runnable_sites() -> list[dict]:
-    """Sites the portal offers to collect, with the side effect of each made visible."""
+    """The sites the portal offers to collect."""
     configs, _ = scan_sources()
-    out = []
-    for config in configs:
-        order_probes = [p.name for p in config.probes if p.creates_order]
-        out.append(
-            {
-                "slug": config.slug,
-                "name": config.name,
-                "status": config.status,
-                "fetcher": config.fetcher,
-                "order_probes": order_probes,
-            }
-        )
-    return out
+    return [
+        {
+            "slug": config.slug,
+            "name": config.name,
+            "status": config.status,
+            "fetcher": config.fetcher,
+        }
+        for config in configs
+    ]
 
 
 def _is_waiting(info) -> bool:
