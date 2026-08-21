@@ -13,8 +13,13 @@
 } %}
 
 {% macro channel(value) -%}
+{% set logo = channel_logo(value) if channel_logo is defined else None -%}
 <span class="ch">
+  {% if logo -%}
+  <img class="ch-logo" src="{{ logo }}" alt="" aria-hidden="true">
+  {%- else -%}
   <span class="ch-mark ch-{{ value }}" aria-hidden="true">{{ CHANNEL_MARKS.get(value, "··") | safe }}</span>
+  {%- endif %}
   <span class="ch-label">{{ CHANNEL_LABELS.get(value, value) }}</span>
 </span>
 {%- endmacro %}
@@ -66,6 +71,28 @@
 </span>
 {%- endmacro %}
 
+{# A document with its format written on it, so the two export buttons are told apart by
+   more than the word beside them. #}
+{% macro file_icon(kind) -%}
+<svg class="file-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"
+     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+  <path d="M9 1.6H4.4A1.4 1.4 0 0 0 3 3v10a1.4 1.4 0 0 0 1.4 1.4h7.2A1.4 1.4 0 0 0 13 13V5.6z"/>
+  <path d="M9 1.6V5.6h4"/>
+  <path d="M5.4 9.4h5.2" stroke-width="1.2"/>
+  <path d="M5.4 11.6h3.2" stroke-width="1.2"/>
+</svg>
+{%- endmacro %}
+
+{# One copy icon, drawn rather than borrowed from a font. The old &#10696; rendered as a
+   different shape on every machine - and on some, as a box. #}
+{% macro copy_icon() -%}
+<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"
+     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+  <rect x="5.5" y="5.5" width="8" height="8" rx="1.6"/>
+  <path d="M10.5 3.2a1.7 1.7 0 0 0-1.7-1.7H4.2a1.7 1.7 0 0 0-1.7 1.7v4.6a1.7 1.7 0 0 0 1.7 1.7"/>
+</svg>
+{%- endmacro %}
+
 {# An account number: monospace, links to its detail page, with a copy button. #}
 {% macro number(a) -%}
 {{ number_text(a.id, a.account_number) }}
@@ -75,7 +102,7 @@
 {% macro number_text(account_id, value) -%}
 <span class="num-cell">
   <a href="/accounts/{{ account_id }}">{{ value }}</a>
-  <button class="copy" type="button" title="Copy number" data-copy="{{ value }}">&#10696;</button>
+  <button class="copy" type="button" title="Copy number" data-copy="{{ value }}">{{ copy_icon() }}</button>
 </span>
 {%- endmacro %}
 
@@ -88,7 +115,7 @@
 {% macro copyable(value, label="Copy name") -%}
 <span class="num-cell">
   <span class="clip" title="{{ value }}">{{ value }}</span>
-  <button class="copy" type="button" title="{{ label }}" data-copy="{{ value }}">&#10696;</button>
+  <button class="copy" type="button" title="{{ label }}" data-copy="{{ value }}">{{ copy_icon() }}</button>
 </span>
 {%- endmacro %}
 

@@ -13,8 +13,9 @@ import re
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta, timezone
 from math import ceil
+from pathlib import Path
 
-from fastapi import APIRouter, Depends, Form, Request
+from fastapi import APIRouter, Depends, Form, Request, Response
 from fastapi.responses import (
     FileResponse,
     HTMLResponse,
@@ -28,7 +29,7 @@ from sqlalchemy.orm import Session
 from ght.api import TEMPLATES_DIR
 from ght.api.jobs import manager
 from ght.api.schedule import MIN_MINUTES, Scheduler
-from ght.config import settings
+from ght.config import REPO_ROOT, settings
 from ght.db import SessionLocal
 from ght.models import (
     AccessLog,
@@ -151,6 +152,43 @@ def _nav(session: Session) -> dict:
         # Local time, to match every timestamp shown in the tables below it.
         "now": datetime.now(DHAKA).strftime("%d/%m/%Y %I:%M %p"),
     }
+
+
+# Somewhere to drop the payment brands' own logos. Nothing ships here: bKash, Nagad, Upay
+# and the banks own their marks, and an approximation drawn from memory would be a
+# counterfeit rather than a logo. Put a licensed file at data/branding/<channel>.svg (or
+# .png) and the portal uses it wherever that channel appears; without one it falls back to
+# the lettered mark, which is what every screenshot in this repo shows.
+BRANDING_DIR = REPO_ROOT / "data" / "branding"
+BRANDING_TYPES = {".svg": "image/svg+xml", ".png": "image/png", ".webp": "image/webp"}
+
+
+def _branding_file(channel: str) -> Path | None:
+    """The logo file for a channel, if someone has supplied one."""
+    if not channel or "/" in channel or "\\" in channel or "." in channel:
+        return None
+    for suffix in BRANDING_TYPES:
+        candidate = BRANDING_DIR / f"{channel}{suffix}"
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def channel_logo(channel: str) -> str | None:
+    """The URL of a channel's own logo, or None to use the lettered mark."""
+    return f"/branding/{channel}" if _branding_file(channel) else None
+
+
+templates.env.globals["channel_logo"] = channel_logo
+
+
+@router.get("/branding/{channel}")
+def branding(channel: str):
+    """Serve a supplied brand logo. Only the configured channel names, never a path."""
+    path = _branding_file(channel)
+    if path is None:
+        return HTMLResponse("<h1>404</h1><p>No logo for that channel.</p>", status_code=404)
+    return FileResponse(path, media_type=BRANDING_TYPES[path.suffix])
 
 
 @router.get("/", response_class=HTMLResponse)
@@ -780,6 +818,56 @@ def _merchant_rows(channel: str | None, q: str | None, run: int | None):
     if q:
         stmt = stmt.where(MerchantSighting.merchant_name.like(f"%{q.strip()}%"))
     return stmt
+
+
+@router.get("/payees.pdf")
+def payees_pdf(
+    request: Request,
+    channel: str | None = None,
+    q: str | None = None,
+    run: int | None = None,
+    session: Session = Depends(get_session),
+):
+    """The same payees as a document rather than a data file.
+
+    The CSV is for a system to read; this is for a person to file, initial, or attach to a
+    case. So it carries the things a loose printed page needs to still mean something: what
+    it is a report of, when it was taken, by whom, and a page number on every sheet.
+    """
+    rows = [dict(r._mapping) for r in session.execute(_payee_query(channel, q, run))]
+    run_row = session.get(CollectionRun, run) if run else None
+    scope = _describe_scope(channel, q, run_row)
+    _log(session, request, "export", {"format": "pdf", "channel": channel, "q": q, "run": run},
+         len(rows))
+
+    try:
+        from ght.export.report import build_pdf
+    except ImportError:
+        return HTMLResponse(
+            "<h1>PDF export is not installed</h1>"
+            '<p>Install the export extra: <code>pip install -e ".[export]"</code></p>',
+            status_code=501,
+        )
+
+    pdf = build_pdf(rows, scope=scope, actor=_actor(request), channel_labels=CHANNEL_LABELS)
+    stamp = datetime.now(DHAKA).strftime("%Y%m%d-%H%M")
+    return Response(
+        content=pdf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="payees-{stamp}.pdf"'},
+    )
+
+
+def _describe_scope(channel: str | None, q: str | None, run_row) -> str:
+    """One line naming the filters behind a report, so it cannot be mistaken for all of it."""
+    parts = []
+    if run_row is not None:
+        parts.append(f"run #{run_row.id}")
+    if channel:
+        parts.append(CHANNEL_LABELS.get(channel, channel))
+    if q:
+        parts.append(f'matching "{q.strip()}"')
+    return "Filtered to " + ", ".join(parts) if parts else "All payees, all sites"
 
 
 @router.get("/accounts.csv")

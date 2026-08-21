@@ -34,7 +34,11 @@
   </select>
   <input type="hidden" name="per" value="{{ per }}">
   {% if run %}<input type="hidden" name="run" value="{{ run }}">{% endif %}
-  <a class="btn" href="/accounts.csv?channel={{ channel or '' }}&q={{ q }}{{ '&run=' ~ run if run }}">&darr; Export CSV</a>
+  {% set filters = "channel=" ~ (channel or '') ~ "&q=" ~ q ~ ("&run=" ~ run if run else "") %}
+  <a class="btn" href="/accounts.csv?{{ filters }}" title="Every column, for a spreadsheet">
+    {{ ui.file_icon("csv") }} CSV</a>
+  <a class="btn" href="/payees.pdf?{{ filters }}" title="A report to file or hand on">
+    {{ ui.file_icon("pdf") }} PDF</a>
 </form>
 
 {% if rows %}

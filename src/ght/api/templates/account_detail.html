@@ -29,7 +29,7 @@
     </section>
 
     <button class="btn copy-wide" type="button"
-            data-copy="{{ account.account_number }}">&#10696; Copy account number</button>
+            data-copy="{{ account.account_number }}">{{ ui.copy_icon() }} Copy account number</button>
 
     <section class="panel">
       <h2>Seen on {{ sites | length }} site{{ "" if sites | length == 1 else "s" }}</h2>
