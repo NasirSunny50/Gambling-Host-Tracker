@@ -56,6 +56,14 @@ flow_timeout: 25
 unavailable:
   - ".modal-payment--method-undefined"
 
+# Between methods, close the open modal instead of reloading the whole panel. The panel
+# takes ten to thirteen seconds to start and every method needs the same one; closing the
+# modal is under a second. `gone` is the proof it worked - if the modal is still there the
+# run reloads rather than clicking the next method through it.
+reset:
+  click: ".modal-payment__close"
+  gone: ".modal-payment.active"
+
 # Present only when signed out; its appearance means the session must be refreshed.
 logged_out_marker: registration-layout-widget
 # A dead session redirects the account page to /en/user/login.

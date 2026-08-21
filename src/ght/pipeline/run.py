@@ -92,6 +92,7 @@ def _fetcher_kwargs(config: SourceConfig) -> dict:
         "frame": config.frame,
         "logged_out_marker": config.logged_out_marker,
         "unavailable": config.unavailable,
+        "reset": config.reset,
     }
     if config.timeout is not None:
         kwargs["timeout"] = config.timeout
@@ -187,6 +188,64 @@ def _looks_logged_out(config: SourceConfig, capture: RawCapture) -> bool:
     return bool(url_marker and url_marker in (capture.url or ""))
 
 
+@dataclass(frozen=True)
+class _Plan:
+    """One probe as the fetcher needs to see it, for a shared-panel pass."""
+
+    name: str
+    flow: list
+    wait_for: str | None
+    # Confirming a deposit hands off to the provider's own site, which leaves nothing
+    # behind to reset - whatever follows has to start from a fresh page.
+    ends_navigation: bool
+
+
+def _collect_in_one_visit(
+    config: SourceConfig, probes: list[Probe], on_progress: ProgressFn | None
+) -> tuple[list, str | None, bool] | None:
+    """Walk every probe inside one loaded panel, or None if this source cannot.
+
+    Loading the embedded panel costs ten to thirteen seconds and every probe needs the same
+    one, so re-fetching it per probe was the bulk of a run. Only browser sources with a
+    configured reset can do this: without a proven way back to the method list, sharing the
+    panel risks one method's modal answering the next method's question.
+    """
+    if config.fetcher != "browser" or config.reset is None or len(probes) < 2:
+        return None
+
+    fetcher = get_fetcher(config.fetcher, **_fetcher_kwargs(config))
+    if not hasattr(fetcher, "fetch_many"):
+        return None
+
+    urls = list(config.current_urls)
+    plans = []
+    configs = []
+    for probe in probes:
+        probe_config = config_for_probe(config, probe)
+        configs.append(probe_config)
+        plans.append(
+            _Plan(
+                name=probe.name,
+                flow=probe.flow,
+                wait_for=probe_config.wait_for,
+                ends_navigation=probe.creates_order,
+            )
+        )
+
+    total = len(plans)
+    emit_progress(on_progress, "collect", f"Opening the deposit panel ({total} methods)", step=0, total=total)
+    results = fetcher.fetch_many(urls, plans)
+
+    captures = []
+    auth_expired = False
+    for index, (probe, probe_config, capture) in enumerate(zip(probes, configs, results), start=1):
+        emit_progress(on_progress, "collect", f"Read {probe.name}", step=index, total=total)
+        captures.append((probe, probe_config, capture))
+        if _looks_logged_out(config, capture):
+            auth_expired = True
+    return captures, (urls[0] if urls else None), auth_expired
+
+
 def _collect_captures(
     config: SourceConfig, on_progress: ProgressFn | None = None
 ) -> tuple[list, str | None, bool]:
@@ -201,6 +260,11 @@ def _collect_captures(
     auth_expired = False
     probes = probes_of(config)
     total = len(probes)
+
+    shared = _collect_in_one_visit(config, probes, on_progress)
+    if shared is not None:
+        return shared
+
     for index, probe in enumerate(probes, start=1):
         emit_progress(on_progress, "collect", f"Reading {probe.name}", step=index, total=total)
         probe_config = config_for_probe(config, probe)

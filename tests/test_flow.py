@@ -131,6 +131,9 @@ class FakePage:
     def wait_for_load_state(self, state, timeout=None):
         pass
 
+    def wait_for_timeout(self, ms):
+        pass
+
 
 def test_walk_clicks_every_step_in_order():
     fetcher = BrowserFetcher(
@@ -163,12 +166,28 @@ def test_optional_step_that_is_absent_is_skipped():
 # --------------------------------------------- a method the site has switched off
 
 
-class FakePageWithMarkers(FakePage):
-    """A page that answers a click with whichever panel the site decided to render."""
+class _Visible:
+    """A minimal element handle: present in the DOM, and possibly on screen."""
 
-    def __init__(self, present=(), failing=None):
+    def __init__(self, visible: bool):
+        self._visible = visible
+
+    def is_visible(self):
+        return self._visible
+
+
+class FakePageWithMarkers(FakePage):
+    """A page that answers a click with whichever panel the site decided to render.
+
+    ``present`` is what is in the DOM; ``visible`` is what the user can see. They differ
+    after a modal closes - its markup stays behind - which is exactly the case that made
+    a shared panel report every later method as switched off.
+    """
+
+    def __init__(self, present=(), failing=None, visible=None):
         super().__init__(failing=failing)
         self.present = set(present)
+        self.visible = set(self.present if visible is None else visible)
 
     def wait_for_selector(self, selector, timeout=None):
         self.waited.append(selector)
@@ -179,7 +198,7 @@ class FakePageWithMarkers(FakePage):
         raise TimeoutError(f"no element matching {selector}")
 
     def query_selector(self, selector):
-        return object() if selector in self.present else None
+        return _Visible(selector in self.visible) if selector in self.present else None
 
 
 def test_a_switched_off_method_is_not_reported_as_a_broken_flow():
@@ -202,6 +221,37 @@ def test_the_expected_panel_still_wins_when_it_is_the_one_that_rendered():
         unavailable=[".modal-payment--method-undefined"],
     )
     page = FakePageWithMarkers(present={".payment-cell", ".payee"})
+    assert fetcher._walk(page) is None
+    assert fetcher._unavailable_hit is None
+
+
+def test_a_leftover_marker_from_the_last_method_is_not_this_method_being_off():
+    """The closed modal keeps its classes. Reading presence rather than visibility made a
+    shared panel report every method after the first closed one as switched off, and
+    collect nothing at all."""
+    fetcher = BrowserFetcher(
+        flow=[Step(click=".payment-cell", wait_for=".payee")],
+        unavailable=[".modal-payment--method-undefined"],
+    )
+    page = FakePageWithMarkers(
+        present={".payment-cell", ".payee", ".modal-payment--method-undefined"},
+        visible={".payment-cell", ".payee"},  # the old modal is closed but still in the DOM
+    )
+    assert fetcher._walk(page) is None
+    assert fetcher._unavailable_hit is None
+
+
+def test_the_expected_panel_beats_a_marker_that_is_also_showing():
+    """Mid-swap the site's one modal element is visible wearing the last method's class
+    while already showing this method's payee. The payee is the answer."""
+    fetcher = BrowserFetcher(
+        flow=[Step(click=".payment-cell", wait_for=".payee")],
+        unavailable=[".modal-payment--method-undefined"],
+    )
+    page = FakePageWithMarkers(
+        present={".payment-cell", ".payee", ".modal-payment--method-undefined"},
+        visible={".payment-cell", ".payee", ".modal-payment--method-undefined"},
+    )
     assert fetcher._walk(page) is None
     assert fetcher._unavailable_hit is None
 
@@ -705,3 +755,91 @@ def test_no_session_file_means_nothing_is_written(tmp_path):
         FakeContext({"cookies": []}), FakePageUA(), "<html>ok</html>", None
     )
     assert not missing.exists()
+
+
+# ------------------------------------ sharing one loaded panel between probes
+
+
+class FakePanel:
+    """A page with a modal that may or may not close when asked."""
+
+    def __init__(self, open_modal=True, closes=True, close_button=True):
+        self.open_modal = open_modal
+        self.closes = closes
+        self.close_button = close_button
+        self.clicked = 0
+
+    def query_selector(self, selector):
+        if selector == ".modal-payment.active":
+            return object() if self.open_modal else None
+        if selector == ".modal-payment__close":
+            return _CloseHandle(self) if self.close_button else None
+        return None
+
+    def wait_for_selector(self, selector, state=None, timeout=None):
+        still_open = selector == ".modal-payment.active" and state == "detached" and self.open_modal
+        if still_open:
+            raise TimeoutError("modal is still open")
+
+
+class _CloseHandle:
+    def __init__(self, panel):
+        self.panel = panel
+
+    def click(self, timeout=None):
+        self.panel.clicked += 1
+        if self.panel.closes:
+            self.panel.open_modal = False
+
+
+def _panel_fetcher():
+    from ght.sources import Reset
+
+    return BrowserFetcher(reset=Reset(click=".modal-payment__close", gone=".modal-payment.active"))
+
+
+def test_a_closed_modal_lets_the_next_probe_reuse_the_panel():
+    fetcher = _panel_fetcher()
+    panel = FakePanel(open_modal=True, closes=True)
+    assert fetcher._reset_panel(panel) is True
+    assert panel.clicked == 1
+
+
+def test_a_modal_that_will_not_close_forces_a_reload():
+    """The dangerous case. Clicking the next method through a half-open modal would record
+    that probe as broken - or worse, answer it with the modal still showing the last one."""
+    fetcher = _panel_fetcher()
+    panel = FakePanel(open_modal=True, closes=False)
+    assert fetcher._reset_panel(panel) is False
+
+
+def test_a_missing_close_button_forces_a_reload():
+    fetcher = _panel_fetcher()
+    panel = FakePanel(open_modal=True, close_button=False)
+    assert fetcher._reset_panel(panel) is False
+
+
+def test_nothing_open_means_the_panel_is_already_reachable():
+    fetcher = _panel_fetcher()
+    panel = FakePanel(open_modal=False)
+    assert fetcher._reset_panel(panel) is True
+    assert panel.clicked == 0
+
+
+def test_without_a_configured_reset_the_panel_is_never_shared():
+    fetcher = BrowserFetcher()
+    assert fetcher._reset_panel(FakePanel(open_modal=False)) is False
+
+
+def test_a_source_without_a_reset_keeps_fetching_one_probe_at_a_time():
+    """Sharing needs a proven way back to the method list. Without one the old path, which
+    reloads for every probe, is slower and still correct - so it stays the default."""
+    from ght.pipeline.run import _collect_in_one_visit
+    from ght.sources import Probe
+
+    config = SourceConfig(
+        slug="x", name="X", fetcher="browser",
+        urls=[SourceUrl(url="https://x.invalid/")],
+        probes=[Probe(name="a", wait_for="#a"), Probe(name="b", wait_for="#b")],
+    )
+    assert _collect_in_one_visit(config, list(config.probes), None) is None

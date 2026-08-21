@@ -85,6 +85,7 @@ class BrowserFetcher:
         logged_out_marker: str | None = None,
         unavailable: list[str] | None = None,
         flow_timeout: int | None = None,
+        reset=None,
     ) -> None:
         self.timeout = (timeout if timeout is not None else settings.request_timeout) * 1000
         # Optional selector to wait for, so we capture after the deposit panel renders
@@ -113,6 +114,8 @@ class BrowserFetcher:
         self.flow_timeout = (flow_timeout * 1000) if flow_timeout is not None else self.timeout
         # Set by _walk when the site declared a method unavailable.
         self._unavailable_hit: str | None = None
+        # How to close an open modal so the next probe can use the same loaded panel.
+        self.reset = reset
 
     def _auth_kwargs(self) -> tuple[dict, str | None]:
         """Reuse a saved browser session when the deposit page sits behind a login.
@@ -196,13 +199,36 @@ class BrowserFetcher:
         """
         combined = ", ".join([wanted, *self.unavailable]) if self.unavailable else wanted
         page.wait_for_selector(combined, timeout=self.flow_timeout)
+
+        # The panel we asked for wins, always. The site reuses one modal element for every
+        # method and only swaps its classes once the new one has loaded, so between two
+        # probes it is briefly visible still wearing the last method's "unavailable" class.
+        # Believing that marker over the payee actually in front of us reported every
+        # method after the first closed one as switched off, and collected nothing.
+        if self._visible(page, wanted):
+            return
+        # Not there yet: give the modal a moment to finish swapping before taking the
+        # marker at its word.
+        page.wait_for_timeout(1000)
+        if self._visible(page, wanted):
+            return
         for marker in self.unavailable:
-            try:
-                if page.query_selector(marker) is not None:
-                    self._unavailable_hit = marker
-                    return
-            except Exception:  # noqa: BLE001, S110 - an unreadable marker is not a hit
-                pass
+            if self._visible(page, marker):
+                self._unavailable_hit = marker
+                return
+
+    @staticmethod
+    def _visible(page, selector: str) -> bool:
+        """Whether the selector matches something actually on screen.
+
+        Presence is not enough: a closed modal keeps its markup, so a probe sharing the
+        panel would keep matching the previous method's leftovers.
+        """
+        try:
+            handle = page.query_selector(selector)
+            return handle is not None and handle.is_visible()
+        except Exception:  # noqa: BLE001 - unreadable is not visible
+            return False
 
     def _missing_option(self, page, step) -> str | None:
         """Report a dropdown that no longer offers the configured option.
@@ -299,6 +325,174 @@ class BrowserFetcher:
                 if self.frame in frame.url and not _detached(frame):
                     return frame
         return page
+
+    def _reset_panel(self, page) -> bool:
+        """Close the open modal so the next probe can use the same loaded panel.
+
+        Returns whether the panel is trustworthy for another probe. False means "reload" -
+        never "carry on and hope". A half-closed modal swallows the next probe's click, and
+        that would be recorded as *that* probe's selector being broken, sending someone to
+        fix a config that was correct.
+        """
+        if self.reset is None:
+            return False
+        try:
+            if page.query_selector(self.reset.gone) is None:
+                return True  # nothing is open; the list is already reachable
+            handle = page.query_selector(self.reset.click)
+            if handle is None:
+                return False
+            handle.click(timeout=self.flow_timeout)
+            page.wait_for_selector(self.reset.gone, state="detached", timeout=5000)
+            return True
+        except Exception:  # noqa: BLE001 - any doubt at all means reload instead
+            return False
+
+    def _looks_logged_out(self, html: str | None) -> bool:
+        return bool(self.logged_out_marker and html and self.logged_out_marker in html)
+
+    def _open_frame(self, page):
+        """The embedded panel as it stands right now, without waiting for one to appear.
+
+        Unlike ``_target`` this never blocks: it is asked between probes, where a missing
+        frame simply means the page has to be reloaded anyway.
+        """
+        if not self.frame:
+            return page
+        for frame in page.frames:
+            if self.frame in frame.url and not _detached(frame):
+                return frame
+        return page
+
+    def fetch_many(self, urls: list[str], plans: list) -> list:
+        """Walk several probes inside one loaded panel.
+
+        Every probe needs the same method list, and the embedded panel takes ten to
+        thirteen seconds to start each time it is loaded - which was the bulk of a run
+        spent re-fetching a page we already had. So the browser, the page and the panel are
+        opened once and each probe is walked inside them.
+
+        Each returned capture still stands alone: its own HTML, its own screenshot, its own
+        flow error. Whenever the panel cannot be proven clean between probes it is reloaded,
+        so sharing it can cost time but cannot mix one method's payee up with another's.
+        """
+        try:
+            from playwright.sync_api import sync_playwright
+        except ImportError:
+            return [self._no_playwright(urls[0] if urls else "") for _ in plans]
+
+        auth_kwargs, auth_warning = self._auth_kwargs()
+        captures: list = []
+        try:
+            with sync_playwright() as playwright:
+                browser = self._launch(playwright)
+                context = browser.new_context(
+                    user_agent=self._session_user_agent or settings.user_agent,
+                    locale="en-US",
+                    viewport={"width": 1366, "height": 900},
+                    **auth_kwargs,
+                )
+                page = context.new_page()
+                response = None
+                landing = urls[0] if urls else ""
+                needs_load = True
+                last_html: str | None = None
+
+                for index, plan in enumerate(plans):
+                    if needs_load:
+                        response = None
+                        for url in urls:
+                            try:
+                                response = page.goto(
+                                    url, timeout=self.timeout, wait_until="domcontentloaded"
+                                )
+                                landing = url
+                                break
+                            except Exception:  # noqa: BLE001, S112 - try the next mirror
+                                continue
+                        if response is None:
+                            captures.extend(
+                                self._failed(landing, "no configured url could be loaded")
+                                for _ in plans[index:]
+                            )
+                            break
+                        needs_load = False
+
+                    # The probe's own flow and completion marker for this pass.
+                    self.flow = plan.flow
+                    self.wait_for = plan.wait_for
+                    capture = self._capture_here(page, response, auth_warning)
+                    captures.append(capture)
+                    last_html = capture.html or last_html
+
+                    # A dead session hits every probe the same way; stop at the first one.
+                    if self._looks_logged_out(capture.html):
+                        captures.extend(
+                            self._failed(landing, "session expired") for _ in plans[index + 1 :]
+                        )
+                        break
+
+                    if index + 1 < len(plans):
+                        # A probe that navigates out of the panel leaves nothing to reset.
+                        moved = plan.ends_navigation or (landing not in (page.url or ""))
+                        # The modal belongs to the embedded panel, not to the page around
+                        # it. Resetting the page found no modal, reported success, and left
+                        # the old one open over the next method's click - which the site
+                        # then answered with its "undefined" modal for every method.
+                        needs_load = moved or not self._reset_panel(self._open_frame(page))
+
+                self._refresh_session(context, page, last_html, None)
+                context.close()
+                browser.close()
+        except Exception as exc:  # noqa: BLE001 - any browser failure is a failed run
+            captures.extend(
+                self._failed(urls[0] if urls else "", f"{type(exc).__name__}: {exc}")
+                for _ in plans[len(captures) :]
+            )
+        return captures
+
+    def _failed(self, url: str, error: str):
+        return RawCapture(
+            url=url,
+            status_code=0,
+            fetcher=self.name,
+            fetched_at=datetime.now(UTC),
+            error=error,
+        )
+
+    def _no_playwright(self, url: str):
+        return self._failed(
+            url,
+            'playwright not installed; pip install -e ".[browser]" && playwright install chromium',
+        )
+
+    def _capture_here(self, page, response, auth_warning: str | None):
+        """Walk the current probe's flow on an already-open page and capture the result."""
+        target, frame_error = self._target(page)
+        start_url = page.url
+        flow_error = None if frame_error else self._walk(target)
+
+        navigated = self._await_navigation(page, start_url)
+        target = self._capture_target(page, navigated=navigated)
+        declined = self._unavailable_hit
+        settle_error = self._settle(
+            target,
+            skip_wait_for=frame_error is not None
+            or flow_error is not None
+            or declined is not None,
+        )
+        html, read_error = _read_html(target, page)
+        return RawCapture(
+            url=redact_url(target.url),
+            status_code=response.status if response else 0,
+            html=html,
+            screenshot=page.screenshot(full_page=True) if self.screenshot else None,
+            headers=dict(response.headers) if response else {},
+            fetcher=self.name,
+            fetched_at=datetime.now(UTC),
+            flow_error=(frame_error or flow_error or settle_error or read_error or auth_warning),
+            unavailable=declined,
+        )
 
     def _await_navigation(self, page, start_url: str, budget_ms: int = 6000) -> bool:
         """Did the flow move the whole tab? Waits briefly, since navigation is async."""

@@ -158,6 +158,17 @@ class Login(_Strict):
     assisted: bool = False
 
 
+class Reset(_Strict):
+    """Getting back to the method list after a probe, without reloading the panel."""
+
+    # What closes the open modal.
+    click: str
+    # A selector that matches only while a modal is open. The reset is only trusted once
+    # this stops matching: a half-closed modal would swallow the next probe's click and be
+    # reported as that probe's selector being broken.
+    gone: str
+
+
 class SourceConfig(_Strict):
     slug: str
     name: str
@@ -189,6 +200,11 @@ class SourceConfig(_Strict):
     timeout: int | None = None
     # Per-method probes. A source uses either these or the single flow/blocks pair above.
     probes: list[Probe] = Field(default_factory=list)
+    # How to put the panel back the way it was between probes. Every probe needs the
+    # method list, and reaching it again by reloading the page costs the iframe's whole
+    # start-up - measured at ten to thirteen seconds, which was most of a run. Closing the
+    # open modal instead keeps one loaded panel for every method.
+    reset: Reset | None = None
     # Selectors that mean the site itself has switched a method off - it renders a
     # "not available" panel instead of the payee. That is the operator's decision, not a
     # stale selector on our side, and the difference decides whether a run is reported as
