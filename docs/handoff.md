@@ -69,6 +69,12 @@ every sign-in, so there the credentials save the typing rather than the person. 
 also roll forward now - a signed-in fetch writes the refreshed cookies back, guarded so a
 logged-out capture can never overwrite a good session.
 
+After a run ends, the outcome card is shown once and stood down on the next load - it is
+an announcement, not a state, and the run history below keeps it permanently. Its button
+goes to `/payees?run=<id>`, which filters the Payees list to what that run brought in;
+membership comes from the observations the run wrote, not the accounts table, because an
+account outlives any single run.
+
 `docs/design-brief.md` is the brief the design pass was made against.
 
 ## Known open items

@@ -224,8 +224,21 @@ def _paginate(
     return list(rows), page
 
 
-def _account_query(channel: str | None, status: str, q: str | None):
+def _accounts_from_run(run_id: int):
+    """The accounts one run actually saw.
+
+    Membership comes from the observations that run wrote, not from the accounts table:
+    an account is a de-duplicated identity that outlives any single run, and "seen twelve
+    times" is the whole point of it. The question here is narrower - which of them did
+    *this* run bring in - and only the sightings know that.
+    """
+    return select(Observation.account_id).where(Observation.run_id == run_id)
+
+
+def _account_query(channel: str | None, status: str, q: str | None, run: int | None = None):
     stmt = select(Account)
+    if run:
+        stmt = stmt.where(Account.id.in_(_accounts_from_run(run)))
     if channel:
         stmt = stmt.where(Account.channel == channel)
     if status == "active":
@@ -244,7 +257,7 @@ def _account_query(channel: str | None, status: str, q: str | None):
     return stmt
 
 
-def _payee_query(channel: str | None, status: str, q: str | None):
+def _payee_query(channel: str | None, status: str, q: str | None, run: int | None = None):
     """Accounts and name-only merchants as one list, newest sighting first.
 
     They are different things — an account is a de-duplicated identity with a number and a
@@ -265,6 +278,8 @@ def _payee_query(channel: str | None, status: str, q: str | None):
         Account.is_active.label("is_active"),
         Account.needs_review.label("needs_review"),
     )
+    if run:
+        accounts = accounts.where(Account.id.in_(_accounts_from_run(run)))
     if channel:
         accounts = accounts.where(Account.channel == channel)
     if status == "active":
@@ -297,6 +312,8 @@ def _payee_query(channel: str | None, status: str, q: str | None):
         )
         .group_by(MerchantSighting.merchant_name, MerchantSighting.channel)
     )
+    if run:
+        merchants = merchants.where(MerchantSighting.run_id == run)
     if channel:
         merchants = merchants.where(MerchantSighting.channel == channel)
     if q:
@@ -310,25 +327,30 @@ def _payee_query(channel: str | None, status: str, q: str | None):
     return select(combined).order_by(combined.c.last_seen.desc())
 
 
+def sites_by_id(session: Session) -> dict:
+    return {s.id: s for s in session.scalars(select(Site))}
+
+
 @router.get("/payees", response_class=HTMLResponse)
 def payees(
     request: Request,
     channel: str | None = None,
     status: str = "all",
     q: str | None = None,
+    run: int | None = None,
     page: int = 1,
     per: int = PAGE_SIZE,
     session: Session = Depends(get_session),
 ):
     """One list of every payee the collector has seen."""
     per_page = per if per in PAGE_SIZES else PAGE_SIZE
-    stmt = _payee_query(channel, status, q)
+    stmt = _payee_query(channel, status, q, run)
     rows, page_info = _paginate(session, stmt, page, per_page=per_page, scalar=False)
     _log(
         session,
         request,
         "search",
-        {"channel": channel, "status": status, "q": q, "page": page_info.number},
+        {"channel": channel, "status": status, "q": q, "run": run, "page": page_info.number},
         page_info.total,
     )
 
@@ -336,6 +358,9 @@ def payees(
         set(session.scalars(select(Account.channel).distinct()).all())
         | set(session.scalars(select(MerchantSighting.channel).distinct()).all())
     )
+    # Filtering to a run is the one filter that is not a control on this page - it arrives
+    # from the run that just finished - so the page has to say whose list this is.
+    run_row = session.get(CollectionRun, run) if run else None
     return templates.TemplateResponse(
         request,
         "payees.html",
@@ -347,6 +372,9 @@ def payees(
             "channel": channel,
             "status": status,
             "q": q or "",
+            "run": run,
+            "run_row": run_row,
+            "run_site": sites_by_id(session).get(run_row.site_id) if run_row else None,
             "per": per_page,
             "page_sizes": PAGE_SIZES,
         },
@@ -484,9 +512,16 @@ def runs(request: Request, session: Session = Depends(get_session)):
         session.execute(select(Evidence.run_id, func.count()).group_by(Evidence.run_id)).all()
     )
 
+    running = manager.is_running
     info = manager.current
-    waiting = bool(info) and manager.is_running and _is_waiting(info)
-    phases = info.phases if info else []
+    waiting = bool(info) and running and _is_waiting(info)
+
+    # The outcome card is shown once and then stood down; reloading is how the operator
+    # says they have read it. Everything it said stays in the history table below.
+    finished = None if running else manager.take_finished()
+    shown = info if running else finished
+
+    phases = shown.phases if shown else []
     # A phase the operator is blocking is not "in progress" — it is waiting on them, and
     # the checklist has to say so rather than spinning as though work were happening.
     if waiting:
@@ -494,9 +529,9 @@ def runs(request: Request, session: Session = Depends(get_session)):
 
     # The run row the finished summary describes: the newest one for that site.
     last_run = None
-    if info and not manager.is_running:
+    if finished:
         last_run = next(
-            (r for r in rows if r.site_id in sites and sites[r.site_id].slug == info.slug), None
+            (r for r in rows if r.site_id in sites and sites[r.site_id].slug == finished.slug), None
         )
 
     return templates.TemplateResponse(
@@ -508,12 +543,13 @@ def runs(request: Request, session: Session = Depends(get_session)):
             "sites": sites,
             "evidence_counts": counts,
             "runnable": _runnable_sites(),
-            "job_running": manager.is_running,
-            "job_log": manager.log_tail,
+            "job_running": running,
+            "job_log": manager.log_tail if finished else [],
             "waiting": waiting,
             "seconds_left": _seconds_left(info) if waiting else None,
             "phases": phases,
-            "elapsed": _elapsed(info) if info else "",
+            "elapsed": _elapsed(shown) if shown else "",
+            "finished": finished,
             "last_run": last_run,
             # While a run is in flight the page reloads itself so progress is visible
             # without the analyst hammering refresh.
@@ -550,11 +586,18 @@ def accounts_csv(
     channel: str | None = None,
     status: str = "all",
     q: str | None = None,
+    run: int | None = None,
     session: Session = Depends(get_session),
 ):
     """The same rows the table is showing, as a file the AML team can hand on."""
-    rows = session.scalars(_account_query(channel, status, q).order_by(Account.channel)).all()
-    _log(session, request, "export", {"channel": channel, "status": status, "q": q}, len(rows))
+    rows = session.scalars(_account_query(channel, status, q, run).order_by(Account.channel)).all()
+    _log(
+        session,
+        request,
+        "export",
+        {"channel": channel, "status": status, "q": q, "run": run},
+        len(rows),
+    )
 
     buffer = io.StringIO()
     writer = csv.writer(buffer)

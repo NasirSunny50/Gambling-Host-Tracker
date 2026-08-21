@@ -268,7 +268,7 @@ def test_a_running_collection_shows_the_checklist_not_a_spinner():
 def test_a_finished_run_summarises_what_it_collected():
     html = render(
         "runs.html",
-        job=job(False, in_flight(finished_at=NOW, returncode=0, message="Finished")),
+        finished=in_flight(finished_at=NOW, returncode=0, message="Finished"),
         job_running=False,
         waiting=False,
         seconds_left=None,
@@ -278,6 +278,8 @@ def test_a_finished_run_summarises_what_it_collected():
     assert "Run finished" in html
     assert "pages saved" in html
     assert "partial" in html
+    # The link after a run asks what *this* run brought in, not what has ever been collected.
+    assert 'href="/payees?run=7"' in html
 
 
 @pytest.mark.parametrize("name", ["components.html"])
@@ -292,7 +294,7 @@ def test_a_failed_run_is_not_dressed_up_as_a_finished_one():
                         message="The saved session was not valid")
     html = render(
         "runs.html",
-        job=job(False, stopped),
+        finished=stopped,
         job_running=False,
         waiting=False,
         seconds_left=None,
@@ -302,7 +304,7 @@ def test_a_failed_run_is_not_dressed_up_as_a_finished_one():
     )
     assert "Run stopped" in html
     assert "Run finished" not in html
-    assert "View collected payees" not in html
+    assert "/payees?run=" not in html
     assert "Login session expired" in html
     assert "phase--stopped" in html
 
@@ -328,3 +330,24 @@ def test_the_portal_knows_when_a_run_is_waiting_on_a_person():
     working = ["Checking the site sign-in", "Signing in", "Already signed in", "Reading nagad"]
     for message in working:
         assert _is_waiting(SimpleNamespace(message=message)) is False, message
+
+
+def test_the_outcome_card_stands_down_once_it_has_been_read():
+    """It is an announcement, not a state. The load after the run ending carries it; a
+    reload gets the page back, and the run is still in the history table below."""
+    from ght.api.jobs import RunInfo, RunManager
+
+    manager = RunManager()
+    manager._current = RunInfo(slug="demo-site", started_at=NOW, finished_at=NOW, returncode=0)
+
+    assert manager.take_finished() is not None
+    assert manager.take_finished() is None
+
+
+def test_a_run_still_going_is_never_taken_as_finished():
+    from ght.api.jobs import RunInfo, RunManager
+
+    manager = RunManager()
+    manager._current = RunInfo(slug="demo-site", started_at=NOW)
+
+    assert manager.take_finished() is None

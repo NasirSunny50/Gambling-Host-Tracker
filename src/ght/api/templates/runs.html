@@ -56,24 +56,26 @@
   </section>
 
 {% else %}
-  {% if job.current %}
-    {% set failed = job.current.failed or (last_run and last_run.status in ("failed", "blocked")) %}
+  {# Shown once, on the load that follows the run ending. A reload stands it down — the
+     run is in the history table below either way. #}
+  {% if finished %}
+    {% set failed = finished.failed or (last_run and last_run.status in ("failed", "blocked")) %}
     <section class="panel run-card">
       <div class="run-head">
         {% if last_run %}{{ ui.outcome_pill(last_run.status) }}
         {% else %}{{ ui.outcome_pill("failed" if failed else "ok") }}{% endif %}
         <h2 class="run-title">
           {{ "Run stopped" if failed else "Run finished" }} &middot;
-          <span class="mono dim">{{ job.current.slug }}</span>
+          <span class="mono dim">{{ finished.slug }}</span>
         </h2>
       </div>
       <p class="run-sub">
-        {{ "Stopped" if failed else "Completed" }} {{ job.current.finished_at | stamp }}{% if elapsed %} &middot; took {{ elapsed }}{% endif %}
+        {{ "Stopped" if failed else "Completed" }} {{ finished.finished_at | stamp }}{% if elapsed %} &middot; took {{ elapsed }}{% endif %}
       </p>
       {% if failed %}
       <div class="callout warn">
         <span class="lead" aria-hidden="true">&#9888;</span>
-        <span>{{ (last_run.error if last_run and last_run.error else job.current.message) }}</span>
+        <span>{{ (last_run.error if last_run and last_run.error else finished.message) }}</span>
       </div>
       {% endif %}
       {{ ui.phases(phases) }}
@@ -84,7 +86,9 @@
         <div class="tile"><div class="tile-n mono">{{ evidence_counts.get(last_run.id, 0) }}</div><div class="tile-k">pages saved</div></div>
       </div>
       {% if last_run.candidates_found %}
-        <a class="btn btn-primary" href="/payees">View collected payees &rarr;</a>
+        {# Filtered to this run, not the whole list: the question after a run is what *it*
+           brought in, and the answer is uninterpretable next to everything ever collected. #}
+        <a class="btn btn-primary" href="/payees?run={{ last_run.id }}">View what this run collected &rarr;</a>
       {% endif %}
       {% endif %}
       {% if job_log %}<div class="logbox">{% for line in job_log %}{{ line }}

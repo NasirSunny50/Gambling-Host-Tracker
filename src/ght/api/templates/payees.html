@@ -8,7 +8,16 @@
 
 {# Short alias: `pagination` describes the slice being shown. #}
 {% set p = pagination %}
-{% set filtered = q or channel or status != "all" %}
+{% set filtered = q or channel or status != "all" or run %}
+
+{% if run_row %}
+<div class="run-filter">
+  <span class="lead">Showing what run #{{ run_row.id }} collected</span>
+  <span class="dim">{{ run_site.slug if run_site else "" }} &middot; {{ run_row.started_at | stamp }}</span>
+  {{ ui.outcome_pill(run_row.status) }}
+  <a class="btn" href="/payees">Show all payees</a>
+</div>
+{% endif %}
 
 {# The selects apply themselves on change: this is a reading tool, and a filter that needs
    a second click to take effect gets left half-set. The search box applies on Enter. #}
@@ -29,7 +38,8 @@
     {% endfor %}
   </select>
   <input type="hidden" name="per" value="{{ per }}">
-  <a class="btn" href="/accounts.csv?channel={{ channel or '' }}&status={{ status }}&q={{ q }}">&darr; Export CSV</a>
+  {% if run %}<input type="hidden" name="run" value="{{ run }}">{% endif %}
+  <a class="btn" href="/accounts.csv?channel={{ channel or '' }}&status={{ status }}&q={{ q }}{{ '&run=' ~ run if run }}">&darr; Export CSV</a>
 </form>
 
 {% if rows %}
@@ -51,7 +61,7 @@
     </tr>
     {% endfor %}
   {% endcall %}
-  {{ ui.pager(p, "/payees", {"q": q, "channel": channel or "", "status": status, "per": per},
+  {{ ui.pager(p, "/payees", {"q": q, "channel": channel or "", "status": status, "run": run or "", "per": per},
               page_sizes=page_sizes, per=per, noun="payees" ~ (" (filtered)" if filtered else "")) }}
 </div>
 
@@ -61,6 +71,14 @@
   they are never marked gone &mdash; the value is the pool of names building up over time.
 </p>
 
+{% elif run_row %}
+  {{ ui.empty(
+      "Run #" ~ run_row.id ~ " collected no payees",
+      "It ran, but no account or name came back from it. The run history says how it ended
+       and what it saved.",
+      glyph="&#9636;",
+      action_href="/runs",
+      action_label="Back to Runs &rarr;") }}
 {% elif filtered %}
   {{ ui.empty(
       "No payees match these filters",
@@ -87,6 +105,11 @@
      ones are what push it over. They truncate with the full value on hover. */
   td .clip { max-width:150px; }
   thead th, tbody td { padding-left:11px; padding-right:11px; }
+  .run-filter { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:14px;
+                padding:10px 14px; border-radius:var(--radius-sm); background:var(--accent-weak);
+                border:1px solid var(--accent); font-size:13px; }
+  .run-filter .lead { font-weight:700; color:var(--accent); }
+  .run-filter .btn { margin-left:auto; height:32px; }
   .footnote { margin:14px 0 0; font-size:12.5px; color:var(--text-3); max-width:760px; }
 </style>
 

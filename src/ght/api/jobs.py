@@ -39,6 +39,9 @@ class RunInfo:
     # still exits 0 — it ran, and recorded a failed run — so the exit code says only that
     # the process finished. This is the one signal that says whether it worked.
     failed_phase: str | None = None
+    # Whether the portal has already shown how this run ended. The outcome is news exactly
+    # once; after that it is history, and history has its own table further down the page.
+    seen: bool = False
 
     @property
     def running(self) -> bool:
@@ -147,6 +150,21 @@ class RunManager:
             info.message = info.message or "Stopped before finishing"
         else:
             info.message = "Finished" if proc.returncode == 0 else "Stopped before finishing"
+
+    def take_finished(self) -> RunInfo | None:
+        """The run that has just ended, reported once and then not again.
+
+        A finished run is an announcement, not a state: the operator needs to see how it
+        went the moment it stops, and then get their page back. Reloading is how someone
+        says they have read it, so the second render is the one that stops showing it.
+        The run itself is not forgotten — it is in the history table, permanently.
+        """
+        with self._lock:
+            info = self._current
+            if info is None or info.running or info.seen:
+                return None
+            info.seen = True
+            return info
 
     @property
     def log_tail(self) -> list[str]:
