@@ -509,7 +509,11 @@ def run_site(
 
     result.accounts = list(merged.values())
     report.extraction = result
-    run.candidates_found = result.selector_hits + result.sweep_hits
+    # Every payee this run brought back, which is what the portal calls it and what the
+    # run's own filtered list shows. Two corrections in one line: it counts de-duplicated
+    # payees rather than extraction hits, and it counts the name-only ones. A run that
+    # collected a Nagad merchant and nothing else was reporting that it had found nothing.
+    run.candidates_found = len(result.accounts) + len(set(report.merchants))
 
     if result.extractor_looks_broken:
         run.status = "partial"

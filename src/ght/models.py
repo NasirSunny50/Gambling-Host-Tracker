@@ -89,6 +89,8 @@ class CollectionRun(Base):
     status: Mapped[str] = mapped_column(String(16), default="ok", index=True)
     http_status: Mapped[int | None] = mapped_column(Integer)
     error: Mapped[str | None] = mapped_column(Text)
+    # Payees this run brought back: de-duplicated accounts plus name-only merchants.
+    # Rows written before 2026-08-22 hold raw extraction hits and exclude merchants.
     candidates_found: Mapped[int] = mapped_column(Integer, default=0)
     accounts_new: Mapped[int] = mapped_column(Integer, default=0)
     started_at: Mapped[datetime] = mapped_column(

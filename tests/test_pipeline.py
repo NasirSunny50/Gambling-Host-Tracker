@@ -242,14 +242,14 @@ def _probe_config(server, probes):
     return make_config(server, probes=probes, blocks=[], fetcher="browser", frame="/deposit")
 
 
-def _captures(monkeypatch, per_probe):
+def _captures(monkeypatch, per_probe, page="demo_site_deposit.html"):
     """Answer each probe with a prepared capture, keyed by probe name."""
     from datetime import UTC, datetime
 
     import ght.pipeline.run as run_module
     from ght.types import RawCapture
 
-    html = (FIXTURES / "demo_site_deposit.html").read_text(encoding="utf-8")
+    html = (FIXTURES / page).read_text(encoding="utf-8")
 
     def fake_fetch(config):
         name = config.wait_for  # the per-probe copy carries its own wait_for; used as a key
@@ -338,3 +338,30 @@ def test_an_incomplete_run_never_concludes_an_account_is_gone(session, server, m
 
     assert report.status == "ok"
     assert report.changes.disappeared_account_ids == []
+
+
+def test_a_name_only_payee_counts_as_found(session, server, monkeypatch):
+    """A run that collected a Nagad merchant and no numbered account was reporting that it
+    found nothing - while its own filtered payee list showed the merchant."""
+    from ght.sources import Probe
+
+    probes = [Probe(name="named", wait_for="#works", channel="nagad", merchant=".merchant-name")]
+    _captures(monkeypatch, {"#works": "ok"}, page="psp_merchant_page.html")
+    config = make_config(server, probes=probes, blocks=[], fetcher="browser", frame="/deposit")
+
+    report = run_site(session, config)
+    session.commit()
+
+    run = session.scalar(select(CollectionRun).order_by(CollectionRun.id.desc()))
+    assert report.merchants, "the fixture page should name a merchant"
+    assert run.candidates_found == len(set(report.merchants))
+
+
+def test_found_counts_payees_rather_than_extraction_hits(session, server):
+    """The figure is labelled "payees found" and sits beside a list of them, so it has to
+    be the size of that list - not how many times the extractors matched something."""
+    report = run_site(session, make_config(server))
+    session.commit()
+
+    run = session.scalar(select(CollectionRun).order_by(CollectionRun.id.desc()))
+    assert run.candidates_found == report.account_count + len(set(report.merchants))

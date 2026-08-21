@@ -344,14 +344,16 @@
     var left = parseInt(clock.getAttribute("data-seconds"), 10);
     if (isNaN(left)) return;
     function pad(n) { return String(n).padStart(2, "0"); }
-    setInterval(function () {
+    var ticking = setInterval(function () {
       left -= 1;
       if (left <= 0) {
+        // Stop counting rather than parking the counter on a large number: a sentinel
+        // left it showing "1666:38" for one second on the way past zero.
+        clearInterval(ticking);
         clock.textContent = "now";
         // Come back once the run has had a moment to start, so the page shows it working
         // rather than a countdown stuck on zero.
         setTimeout(function () { window.location.reload(); }, 4000);
-        left = 99999;
         return;
       }
       var m = Math.floor(left / 60);
