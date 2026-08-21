@@ -102,23 +102,16 @@
 
   <form method="post" action="/runs" class="panel start-card" onsubmit="return confirmRun(this)">
     <h2 class="start-title">Start a collection run</h2>
-    <p class="start-why">It signs in to the site, reads every payment method, and saves any
-       accounts and the pages they came from. A run takes a few minutes and refreshes on its
-       own &mdash; you can leave this page open.</p>
+    <p class="start-why">Signs in, reads every payment method, saves what it finds &mdash;
+       a couple of minutes, and this page keeps itself up to date.</p>
     <label class="field-label" for="run-slug">Site</label>
-    <select name="slug" id="run-slug" onchange="paintOrderWarning()">
+    <select name="slug" id="run-slug">
       {% for s in runnable %}
         <option value="{{ s.slug }}" data-orders="{{ s.order_probes | join(', ') }}">
           {{ s.name }}{{ " (draft)" if s.status != "active" }}
         </option>
       {% endfor %}
     </select>
-    <div class="callout warn" id="order-warning" hidden>
-      <span class="lead" aria-hidden="true">&#9888;</span>
-      <span><strong>One method on this site initiates a deposit request</strong> to reveal its
-      payee (<span id="order-names" class="mono"></span>). No payment is ever made, but a
-      request is created on the operator.</span>
-    </div>
     <button class="btn-primary btn-lg" type="submit">&#9654; Start run</button>
   </form>
 {% endif %}
@@ -129,7 +122,7 @@
     {% for r in rows %}
     <tr>
       <td class="dim mono nowrap">{{ r.started_at | stamp }}</td>
-      <td class="dim">{{ sites[r.site_id].slug if r.site_id in sites else r.site_id }}</td>
+      <td class="dim nowrap">{{ sites[r.site_id].slug if r.site_id in sites else r.site_id }}</td>
       <td>{{ ui.outcome_pill(r.status) }}</td>
       <td class="num mono">{{ r.candidates_found }}</td>
       <td class="num mono" style="{{ 'color:var(--ok)' if r.accounts_new }}">{{ r.accounts_new }}</td>
@@ -202,29 +195,18 @@
 </style>
 
 <script>
-  // Name the side effect before it happens rather than after: the warning appears as soon
-  // as a site with an order-creating method is chosen, and the confirm repeats it.
-  function orderProbes(form) {
-    var opt = form.querySelector("#run-slug").selectedOptions[0];
-    return opt ? (opt.getAttribute("data-orders") || "").trim() : "";
-  }
-  function paintOrderWarning() {
-    var form = document.querySelector(".start-card");
-    if (!form) return;
-    var orders = orderProbes(form);
-    var box = document.getElementById("order-warning");
-    document.getElementById("order-names").textContent = orders;
-    box.hidden = !orders;
-  }
+  // The side effect is still named before it happens, once, in the confirm. A method that
+  // reaches its payee by confirming a deposit raises a real (unpaid) request on the
+  // operator every run, and that is not something to start by a stray click.
   function confirmRun(form) {
-    var orders = orderProbes(form);
+    var opt = form.querySelector("#run-slug").selectedOptions[0];
+    var orders = opt ? (opt.getAttribute("data-orders") || "").trim() : "";
     if (!orders) return true;
     return confirm(
       "This collection will initiate a deposit request (no money moves) for: " +
       orders + ".\n\nContinue?"
     );
   }
-  paintOrderWarning();
 </script>
 
 {% endblock %}

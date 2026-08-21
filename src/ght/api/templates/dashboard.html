@@ -73,7 +73,7 @@
     {% for r in runs %}
     <tr>
       <td class="dim mono nowrap">{{ r.started_at | stamp }}</td>
-      <td class="dim">{{ sites[r.site_id].slug if r.site_id in sites else r.site_id }}</td>
+      <td class="dim nowrap">{{ sites[r.site_id].slug if r.site_id in sites else r.site_id }}</td>
       <td>{{ ui.outcome_pill(r.status) }}</td>
       <td class="num mono">{{ r.candidates_found }}</td>
       <td class="num mono {{ '' if r.accounts_new else 'mute' }}"
