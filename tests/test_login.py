@@ -252,3 +252,77 @@ def test_a_missing_session_file_leaves_the_context_clean(tmp_path):
 
     _restore_context(FakeBrowser(), str(tmp_path / "nope.json"))
     assert "storage_state" not in captured
+
+
+# ----------------------------------------------- is the saved session actually usable
+
+
+class FakePage:
+    """Just enough of a Playwright page for the signed-in check."""
+
+    def __init__(self, url="https://x/account", content="", frames=()):
+        self.url = url
+        self._content = content
+        self.frames = [type("F", (), {"url": u})() for u in frames]
+        self.waited_ms = 0
+
+    def content(self):
+        return self._content
+
+    def wait_for_timeout(self, ms):
+        self.waited_ms += ms
+
+
+def _framed_config(**kw):
+    fields = {
+        "slug": "1xbet-bd",
+        "name": "x",
+        "fetcher": "browser",
+        "logged_out_marker": "registration-layout-widget",
+        "logged_out_url": "/user/login",
+        "frame": "payments.example",
+        "auth_state": "data/auth/x.json",
+    }
+    return SourceConfig(**{**fields, **kw})
+
+
+def test_a_session_that_never_loads_the_payment_app_counts_as_signed_out():
+    """The failure this pins: 1xBet serves the account shell to a dead session — no
+    redirect, no logged-out marker — and only refuses when the payment iframe is asked
+    for. Judging the shell alone reported "already signed in" and the first probe then
+    reported "the site signed us out"."""
+    from ght.auth_login import _page_is_signed_in
+
+    page = FakePage(content="<html>account shell</html>", frames=["https://x/other"])
+    assert _page_is_signed_in(page, _framed_config()) is False
+
+
+def test_a_session_that_loads_the_payment_app_is_signed_in():
+    from ght.auth_login import _page_is_signed_in
+
+    page = FakePage(content="<html>ok</html>", frames=["https://payments.example/deposit"])
+    assert _page_is_signed_in(page, _framed_config()) is True
+
+
+def test_the_logged_out_layout_ends_the_wait_early():
+    """It must not sit out the whole frame timeout once the site has said no."""
+    from ght.auth_login import FRAME_WAIT_MS, _page_is_signed_in
+
+    page = FakePage(content="<div class=registration-layout-widget>")
+    assert _page_is_signed_in(page, _framed_config()) is False
+    assert page.waited_ms < FRAME_WAIT_MS
+
+
+def test_a_site_without_an_embedded_app_is_judged_on_the_page_alone():
+    from ght.auth_login import _page_is_signed_in
+
+    page = FakePage(content="<html>deposit page</html>")
+    assert _page_is_signed_in(page, _framed_config(frame=None)) is True
+
+
+def test_a_redirect_to_the_login_page_still_wins_immediately():
+    from ght.auth_login import _page_is_signed_in
+
+    page = FakePage(url="https://x/en/user/login", content="")
+    assert _page_is_signed_in(page, _framed_config()) is False
+    assert page.waited_ms == 0

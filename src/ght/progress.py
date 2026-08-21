@@ -37,9 +37,20 @@ class Update:
     message: str
     step: int | None = None
     total: int | None = None
+    # False when this phase is where the run stopped. The process exit code cannot carry
+    # this: a collection that ends "failed" is still a subprocess that ran to completion
+    # and exited 0, so without a flag on the phase itself the portal has no way to tell a
+    # finished run from a successful one.
+    ok: bool = True
 
     def as_dict(self) -> dict:
-        return {"phase": self.phase, "message": self.message, "step": self.step, "total": self.total}
+        return {
+            "phase": self.phase,
+            "message": self.message,
+            "step": self.step,
+            "total": self.total,
+            "ok": self.ok,
+        }
 
 
 # What a caller passes in to receive updates; None means "nobody is watching".
@@ -67,6 +78,8 @@ def parse_line(line: str) -> Update | None:
         message=str(payload.get("message", "")),
         step=payload.get("step"),
         total=payload.get("total"),
+        # Older lines have no flag; absence means the phase was fine.
+        ok=bool(payload.get("ok", True)),
     )
 
 

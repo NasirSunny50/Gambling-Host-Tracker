@@ -309,11 +309,21 @@ def run_site(
         run.finished_at = utcnow()
         report.status = "failed"
         report.error = message
+        # Report it against sign-in, not against the probe that tripped over it. The
+        # session is what failed; collection only discovered it. A checklist that ticks
+        # "signed in" and then fails later describes something that never happened.
+        emit_progress(on_progress, "signin", "The saved session was not valid", ok=False)
         session.add(Alert(type="auth_expired", site_id=site.id, payload={"url": capture.url}))
         return report
 
     if status != "ok":
         run.finished_at = utcnow()
+        emit_progress(
+            on_progress,
+            "collect",
+            "The site was blocking us" if status == "blocked" else "The site did not load",
+            ok=False,
+        )
         session.add(
             Alert(
                 type="site_blocked" if status == "blocked" else "site_down",

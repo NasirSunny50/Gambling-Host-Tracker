@@ -569,3 +569,68 @@ def test_unreadable_target_falls_back_to_the_page():
     html, note = _read_html(Dead(), Live())
     assert "landed here" in html
     assert "frame went away" in note
+
+
+# ------------------------------------------------- keeping the session rolling forward
+
+
+class FakeContext:
+    def __init__(self, state):
+        self._state = state
+
+    def storage_state(self):
+        return self._state
+
+
+class FakePageUA:
+    @staticmethod
+    def evaluate(_script):
+        return "UA/2"
+
+
+def _session_file(tmp_path, cookie="old"):
+    state = tmp_path / "auth.json"
+    state.write_text(
+        json.dumps({"storage_state": {"cookies": [cookie]}, "user_agent": "UA/1", "channel": None}),
+        encoding="utf-8",
+    )
+    return state
+
+
+def _stored(state):
+    return json.loads(state.read_text(encoding="utf-8"))
+
+
+def test_a_signed_in_fetch_saves_the_refreshed_session(tmp_path):
+    """Sites roll their session cookie as you browse. Discarding what came back means the
+    stored session only ever ages, and expires however often we collect."""
+    state = _session_file(tmp_path)
+    fetcher = BrowserFetcher(auth_state=str(state), logged_out_marker="registration-widget")
+    fetcher._auth_kwargs()
+    fetcher._refresh_session(FakeContext({"cookies": ["fresh"]}), FakePageUA(), "<html>ok</html>", None)
+    assert _stored(state)["storage_state"] == {"cookies": ["fresh"]}
+    assert _stored(state)["user_agent"] == "UA/2"
+
+
+def test_a_logged_out_capture_never_overwrites_a_good_session(tmp_path):
+    """The guard that matters: writing a logged-out state back would turn one expired
+    session into a permanently broken one."""
+    state = _session_file(tmp_path)
+    fetcher = BrowserFetcher(auth_state=str(state), logged_out_marker="registration-widget")
+
+    fetcher._refresh_session(FakeContext({"cookies": ["dead"]}), FakePageUA(), "<html>ok</html>", "LOGGED_OUT")
+    assert _stored(state)["storage_state"] == {"cookies": ["old"]}
+
+    fetcher._refresh_session(
+        FakeContext({"cookies": ["dead"]}), FakePageUA(), "<div class=registration-widget>", None
+    )
+    assert _stored(state)["storage_state"] == {"cookies": ["old"]}
+
+
+def test_no_session_file_means_nothing_is_written(tmp_path):
+    """An anonymous run must not invent a session file out of a logged-out browser."""
+    missing = tmp_path / "nope.json"
+    BrowserFetcher(auth_state=str(missing))._refresh_session(
+        FakeContext({"cookies": []}), FakePageUA(), "<html>ok</html>", None
+    )
+    assert not missing.exists()

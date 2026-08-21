@@ -82,3 +82,69 @@ def test_run_info_running_flag_flips_on_finish():
     assert info.running is True
     info.finished_at = datetime.now(UTC)
     assert info.running is False
+
+
+# --------------------------------------------------------- what the checklist claims
+
+
+def _info(**kw):
+    from ght.api.jobs import RunInfo
+
+    return RunInfo(slug="1xbet-bd", started_at=datetime.now(UTC), **kw)
+
+
+def test_a_failed_run_does_not_tick_every_phase_green():
+    """The bug this pins: `ght run` records a failed collection and still exits 0, so a
+    checklist keyed on the exit code showed sign-in, collection and storage all "done"
+    for a run whose error said the session was never valid."""
+    info = _info(phase="signin", failed_phase="signin", finished_at=datetime.now(UTC), returncode=0)
+    states = [p["state"] for p in info.phases]
+    assert states == ["stopped", "pending", "pending"]
+    assert info.failed is True
+
+
+def test_a_run_that_failed_later_keeps_the_phases_it_did_finish():
+    info = _info(phase="collect", failed_phase="collect", finished_at=datetime.now(UTC), returncode=0)
+    assert [p["state"] for p in info.phases] == ["done", "stopped", "pending"]
+
+
+def test_a_clean_run_still_reads_as_done_throughout():
+    info = _info(phase="store", finished_at=datetime.now(UTC), returncode=0)
+    assert [p["state"] for p in info.phases] == ["done", "done", "done"]
+    assert info.failed is False
+
+
+def test_a_reported_failure_survives_a_clean_exit_code(monkeypatch):
+    """End to end through the watcher: the failure arrives as a progress line, the process
+    then exits 0, and the manager must not overwrite it with "Finished"."""
+    import json
+    import time
+
+    from ght.api.jobs import RunManager
+    from ght.progress import MARKER, Update
+
+    class Failing:
+        returncode = 0
+        stdout = iter(
+            [
+                MARKER + json.dumps(Update("signin", "Checking the site sign-in").as_dict()),
+                MARKER
+                + json.dumps(
+                    Update("signin", "The saved session was not valid", ok=False).as_dict()
+                ),
+            ]
+        )
+
+        def wait(self):
+            return 0
+
+    manager = RunManager()
+    monkeypatch.setattr("ght.api.jobs.subprocess.Popen", lambda *a, **k: Failing())
+    manager.start("1xbet-bd")
+    for _ in range(50):
+        if not manager.is_running:
+            break
+        time.sleep(0.02)
+    assert manager.current.failed is True
+    assert manager.current.message == "The saved session was not valid"
+    assert [p["state"] for p in manager.current.phases] == ["stopped", "pending", "pending"]

@@ -225,7 +225,7 @@ def job(running=False, current=None):
 
 def in_flight(**kw):
     fields = {"slug": "demo-site", "started_at": NOW, "finished_at": None, "returncode": None,
-              "message": "Reading nagad", "step": 2, "total": 8}
+              "message": "Reading nagad", "step": 2, "total": 8, "failed": False}
     return SimpleNamespace(**{**fields, **kw})
 
 
@@ -283,3 +283,25 @@ def test_a_finished_run_summarises_what_it_collected():
 @pytest.mark.parametrize("name", ["components.html"])
 def test_the_static_pages_render(name):
     assert "Design notes" in render(name)
+
+
+def test_a_failed_run_is_not_dressed_up_as_a_finished_one():
+    """What the operator saw: three green ticks, a "Run finished" heading and an invitation
+    to view payees, on a run whose own error said the session was never valid."""
+    stopped = in_flight(finished_at=NOW, returncode=0, failed=True,
+                        message="The saved session was not valid")
+    html = render(
+        "runs.html",
+        job=job(False, stopped),
+        job_running=False,
+        waiting=False,
+        seconds_left=None,
+        phases=phases(["stopped", "pending", "pending"]),
+        **{**RUNS_BASE, "last_run": run_row(status="failed", candidates_found=0, accounts_new=0,
+                                            error="Login session expired and sign-in did not recover it")},
+    )
+    assert "Run stopped" in html
+    assert "Run finished" not in html
+    assert "View collected payees" not in html
+    assert "Login session expired" in html
+    assert "phase--stopped" in html

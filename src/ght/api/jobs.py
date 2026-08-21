@@ -35,19 +35,44 @@ class RunInfo:
     message: str = "Starting…"
     step: int | None = None
     total: int | None = None
+    # The phase the run stopped at, when it reported one. A collection that ends badly
+    # still exits 0 — it ran, and recorded a failed run — so the exit code says only that
+    # the process finished. This is the one signal that says whether it worked.
+    failed_phase: str | None = None
 
     @property
     def running(self) -> bool:
         return self.finished_at is None
 
     @property
+    def failed(self) -> bool:
+        return self.failed_phase is not None or (
+            self.returncode is not None and self.returncode != 0
+        )
+
+    @property
     def phases(self) -> list[dict]:
         """Every phase with its state, in order, for rendering as a checklist."""
         order = [name for name, _ in PHASES]
+        # A named failure wins over everything else: the phase it names is where the run
+        # stopped, whatever the process did afterwards.
+        if self.failed_phase in order:
+            stopped_at = order.index(self.failed_phase)
+            return [
+                {
+                    "name": name,
+                    "label": label,
+                    "state": "done"
+                    if index < stopped_at
+                    else ("stopped" if index == stopped_at else "pending"),
+                }
+                for index, (name, label) in enumerate(PHASES)
+            ]
+
         current = order.index(self.phase) if self.phase in order else -1
         out = []
         for index, (name, label) in enumerate(PHASES):
-            if not self.running and self.returncode == 0 or index < current:
+            if (not self.running and self.returncode == 0) or index < current:
                 state = "done"
             elif index == current:
                 state = "active" if self.running else "stopped"
@@ -108,13 +133,20 @@ class RunManager:
                     info.message = update.message
                     info.step = update.step
                     info.total = update.total
+                    if not update.ok:
+                        info.failed_phase = update.phase
                     continue
                 self._log_tail.append(line)
                 del self._log_tail[:-40]  # keep only the last 40 lines
         proc.wait()
         info.returncode = proc.returncode
         info.finished_at = datetime.now(UTC)
-        info.message = "Finished" if proc.returncode == 0 else "Stopped before finishing"
+        if info.failed_phase is not None:
+            # Keep what the run said went wrong. Replacing it with "Finished" because the
+            # process exited cleanly is how a failed collection came to look successful.
+            info.message = info.message or "Stopped before finishing"
+        else:
+            info.message = "Finished" if proc.returncode == 0 else "Stopped before finishing"
 
     @property
     def log_tail(self) -> list[str]:

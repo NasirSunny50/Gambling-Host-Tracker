@@ -156,12 +156,59 @@ def _target_url(config: SourceConfig) -> str:
     return urls[0] if urls else config.login.url
 
 
+# How long the session check waits for the embedded payment app before calling the session
+# dead. Shorter than the collector's own timeout on purpose: this runs before every run, and
+# a session that needs longer than this to prove itself is not one to collect on.
+FRAME_WAIT_MS = 20_000
+
+
+def _safe_content(page) -> str | None:
+    """``page.content()``, or None while the page is mid-navigation."""
+    try:
+        return page.content()
+    except Exception:  # noqa: BLE001 - an unreadable page proves nothing either way
+        return None
+
+
+def _payment_frame_appears(page, config: SourceConfig, timeout_ms: int = FRAME_WAIT_MS) -> bool:
+    """Whether the embedded payment app actually loads for this session.
+
+    This is the difference between the session check and the collection. 1xBet serves the
+    account page shell to an expired session — no redirect, no logged-out marker — and only
+    refuses when the payment iframe is requested. Checking the shell alone produced runs
+    that reported "already signed in" and then failed on the first probe with "the site
+    signed us out", which reads as a contradiction because it is one: two different
+    questions were being asked.
+
+    Waiting for the frame asks the collector's question. A frame that never comes is
+    treated as signed out, which costs at worst an unnecessary sign-in window — far
+    cheaper than a run that dies eight probes later with nothing collected.
+    """
+    step = 500
+    waited = 0
+    while waited <= timeout_ms:
+        for frame in page.frames:
+            if config.frame in (frame.url or ""):
+                return True
+        # The logged-out layout can also appear late, once the site has decided about the
+        # session. Bail the moment it does rather than waiting out the whole window.
+        marker = config.logged_out_marker
+        if marker and marker in (_safe_content(page) or ""):
+            return False
+        page.wait_for_timeout(step)
+        waited += step
+    return False
+
+
 def _page_is_signed_in(page, config: SourceConfig) -> bool:
     """Judge a loaded page the same way the collector does.
 
     Checking the *deposit* page rather than the login page matters: a site can bounce an
     anonymous visitor off its login URL too, so "we left the login page" is not evidence of
     anything. Being served the page we actually want is.
+
+    And for a site whose deposit UI is an embedded app, being served the page is not
+    enough — the app inside it has to load, because that is what collection reads.
     """
     url = page.url or ""
     if config.logged_out_url and config.logged_out_url in url:
@@ -175,6 +222,8 @@ def _page_is_signed_in(page, config: SourceConfig) -> bool:
                 return False
         except Exception:  # noqa: BLE001 - an unreadable page proves nothing either way
             return False
+    if config.frame:
+        return _payment_frame_appears(page, config)
     return True
 
 

@@ -298,6 +298,36 @@ class BrowserFetcher:
             return f"wait_for {self.wait_for!r} never matched: {type(exc).__name__}"
         return None
 
+    def _refresh_session(self, context, page, html: str | None, flow_error: str | None) -> None:
+        """Write the session back after a fetch that was still signed in.
+
+        Sites roll their session cookie as you browse. Restoring the same saved file for
+        every probe and then discarding what the site handed back means the stored session
+        only ever gets older, and expires on its own schedule no matter how often we
+        collect. Saving it forward is what makes a run that works today make the next one
+        work too, without anyone signing in again.
+
+        Guarded hard in one direction: a logged-out capture must never be written over a
+        good session. That would turn one expired session into a permanently broken one.
+        """
+        if not self.auth_state or not Path(self.auth_state).exists():
+            return
+        if flow_error == "LOGGED_OUT":
+            return
+        if self.logged_out_marker and html and self.logged_out_marker in html:
+            return
+        try:
+            from ght.auth_login import _save_state
+
+            _save_state(
+                self.auth_state,
+                context.storage_state(),
+                page.evaluate("navigator.userAgent"),
+                self._used_channel or self._session_channel,
+            )
+        except Exception:  # noqa: BLE001 - a session we could not re-save is not a failed fetch
+            return
+
     def fetch(self, url: str) -> RawCapture:
         try:
             from playwright.sync_api import sync_playwright
@@ -355,6 +385,7 @@ class BrowserFetcher:
                         frame_error or flow_error or settle_error or read_error or auth_warning
                     ),
                 )
+                self._refresh_session(context, page, html, capture.flow_error)
                 context.close()
                 browser.close()
                 return capture
