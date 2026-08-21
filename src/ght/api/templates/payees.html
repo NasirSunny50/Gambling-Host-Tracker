@@ -8,7 +8,7 @@
 
 {# Short alias: `pagination` describes the slice being shown. #}
 {% set p = pagination %}
-{% set filtered = q or channel or status != "all" or run %}
+{% set filtered = q or channel or run %}
 
 {% if run_row %}
 <div class="run-filter">
@@ -32,22 +32,17 @@
       <option value="{{ c }}" {{ "selected" if c == channel }}>{{ ui.CHANNEL_LABELS.get(c, c) }}</option>
     {% endfor %}
   </select>
-  <select name="status" onchange="this.form.submit()" aria-label="Status">
-    {% for value, label in [("all","Any status"), ("active","Active"), ("inactive","Gone"), ("review","Needs review")] %}
-      <option value="{{ value }}" {{ "selected" if value == status }}>{{ label }}</option>
-    {% endfor %}
-  </select>
   <input type="hidden" name="per" value="{{ per }}">
   {% if run %}<input type="hidden" name="run" value="{{ run }}">{% endif %}
-  <a class="btn" href="/accounts.csv?channel={{ channel or '' }}&status={{ status }}&q={{ q }}{{ '&run=' ~ run if run }}">&darr; Export CSV</a>
+  <a class="btn" href="/accounts.csv?channel={{ channel or '' }}&q={{ q }}{{ '&run=' ~ run if run }}">&darr; Export CSV</a>
 </form>
 
 {% if rows %}
 <div class="panel">
-  {% call ui.table(["Channel", "Number", "Name", "Bank", "Site", "Confidence", "#Seen", "Last seen"]) %}
+  {% call ui.table(["Channel", "Number", "Name", "Bank", "Site", "#Seen", "Last seen"]) %}
     {% for r in rows %}
-    <tr class="{{ 'name-row' if r.kind == 'merchant' else 'linked' }}"
-        {% if r.kind != "merchant" %}data-href="/accounts/{{ r.id }}"{% endif %}>
+    <tr class="linked"
+        data-href="{{ ('/merchants/' if r.kind == 'merchant' else '/accounts/') ~ r.id }}">
       <td>{{ ui.channel(r.channel) }}</td>
       <td>{% if r.number %}{{ ui.number_text(r.id, r.number) }}{% else %}{{ ui.na() }}{% endif %}</td>
       <td>{% if r.name %}{{ ui.copyable(r.name) }}
@@ -55,13 +50,12 @@
       <td>{% if r.bank %}<span class="clip dim">{{ r.bank }}</span>
           {%- elif r.kind == "merchant" %}{{ ui.na() }}{% else %}{{ ui.unknown() }}{% endif %}</td>
       <td class="dim nowrap">{{ r.site or ui.unknown() }}</td>
-      <td>{{ ui.confidence(r.confidence) }}</td>
       <td class="num mono dim">{{ r.times }}</td>
       <td class="dim mono nowrap">{{ r.last_seen | stamp }}</td>
     </tr>
     {% endfor %}
   {% endcall %}
-  {{ ui.pager(p, "/payees", {"q": q, "channel": channel or "", "status": status, "run": run or "", "per": per},
+  {{ ui.pager(p, "/payees", {"q": q, "channel": channel or "", "run": run or "", "per": per},
               page_sizes=page_sizes, per=per, noun="payees" ~ (" (filtered)" if filtered else "")) }}
 </div>
 {% elif run_row %}
@@ -91,9 +85,6 @@
 {% endif %}
 
 <style>
-  /* A name-only row is tinted so the eye can tell at a glance that its empty cells are
-     empty by nature, not by failure. */
-  .name-row { background:var(--surface-2); }
   /* Eight columns have to fit a laptop without a horizontal scrollbar, and the two free-text
      ones are what push it over. They truncate with the full value on hover. */
   td .clip { max-width:150px; }

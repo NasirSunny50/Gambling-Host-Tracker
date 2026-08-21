@@ -20,8 +20,6 @@
   {{ ui.figure(totals.accounts, "Accounts found", "unique numbers, all time", href="/payees") }}
   {{ ui.figure(totals.runs, "Collections run",
                ("since " ~ (first_run_at | day)) if first_run_at else "none yet", href="/runs") }}
-  {{ ui.figure(totals.review, "Needs review", "low-confidence finds", href="/payees?status=review",
-               tone="warn" if totals.review else "") }}
   {{ ui.figure(totals.sites, "Sites tracked", "configured targets", href="/runs") }}
 </div>
 
@@ -32,7 +30,7 @@
       {% set top = by_channel | map(attribute=1) | max %}
       <div class="bars">
         {% for channel, count in by_channel %}
-        <a class="bar-row" href="/payees?channel={{ channel }}&status=active">
+        <a class="bar-row" href="/payees?channel={{ channel }}">
           <span class="bar-name">{{ ui.channel(channel) }}</span>
           <span class="bar-track"><span class="bar-fill ch-{{ channel }}"
                 style="width: {{ (count / top * 100) | round(0) | int }}%"></span></span>

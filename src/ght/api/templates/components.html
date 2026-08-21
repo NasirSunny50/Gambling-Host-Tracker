@@ -10,7 +10,7 @@
   <section class="panel pad">
     <h3>Status labels</h3>
     <div class="row"><span class="row-k">Account states</span>
-      <span class="row-v">{{ ui.status_pill("active") }} {{ ui.status_pill("gone") }} {{ ui.status_pill("review") }}</span></div>
+      <span class="row-v">{{ ui.status_pill("active") }} {{ ui.status_pill("gone") }}</span></div>
     <div class="row"><span class="row-k">Name-only payee</span>
       <span class="row-v">{{ ui.status_pill("name") }}</span></div>
     <div class="row"><span class="row-k">Run outcomes</span>
@@ -26,17 +26,10 @@
   </section>
 
   <section class="panel pad">
-    <h3>Confidence</h3>
-    <div class="spread wide">
-      {{ ui.confidence(0.97) }}{{ ui.confidence(0.72) }}{{ ui.confidence(0.55) }}{{ ui.confidence(none) }}
-    </div>
-  </section>
-
-  <section class="panel pad">
     <h3>Absence &mdash; two meanings</h3>
     <div class="row"><span class="row-k">Not applicable</span>
       <span class="row-v">{{ ui.na() }}
-        <span class="gloss">a name-only payee has no number, bank or confidence &mdash; there is
+        <span class="gloss">a name-only payee has no number and no bank &mdash; there is
         nothing there to collect</span></span></div>
     <div class="row"><span class="row-k">Unknown</span>
       <span class="row-v">{{ ui.unknown() }}
@@ -48,17 +41,13 @@
     <h3>Design notes</h3>
     <div class="prose">
       <p><strong>Name-only vs numbered payee.</strong> Both live in one table because the
-      reader&rsquo;s question &mdash; who receives the deposits &mdash; is the same. Name-only rows
-      carry a tinted background and a dedicated &ldquo;name only&rdquo; status, and their empty cells
+      reader&rsquo;s question &mdash; who receives the deposits &mdash; is the same. Their empty cells
       render as an em-dash marked <em>not applicable</em>, never as blank. That is deliberately
       distinct from an account with an unknown holder, which reads as an italic
       <em>unknown</em>. A blank cell would let the reader mistake &ldquo;there is none to
-      collect&rdquo; for &ldquo;we failed to collect it&rdquo;.</p>
-
-      <p><strong>Certainty.</strong> Confidence is a percentage plus a three-segment bar plus a
-      word &mdash; exact selector, inferred, or text sweep &mdash; so it is never colour alone and it
-      states its provenance. Only the top tier is safe to feed a blocklist automatically,
-      which the wording makes legible without a legend.</p>
+      collect&rdquo; for &ldquo;we failed to collect it&rdquo;. Both kinds open a page showing
+      the screenshot of where they were published &mdash; for a name-only payee that picture
+      is the whole of the evidence, since there is no number to carry anywhere else.</p>
 
       <p><strong>Waiting for sign-in.</strong> The hardest moment gets its own treatment: a calm
       blue rather than red, a &ldquo;not an error&rdquo; eyebrow, a countdown, and three unmissable
@@ -70,9 +59,10 @@
       thing a case file has to state. Every time shown in a list or on a detail page is the
       exact local timestamp.</p>
 
-      <p><strong>No alerts screen.</strong> Health lives in the data itself: the Overview&rsquo;s
-      &ldquo;needs review&rdquo; figure, the sidebar badge, and the note column on runs carry what a
-      separate feed would, so nobody has to visit a log to know collection is healthy.</p>
+      <p><strong>No alerts screen.</strong> Health lives in the data itself: the note on
+      every run says what it could not read and why, so nobody has to visit a log to know
+      collection is working.</p>
+
     </div>
   </section>
 </div>

@@ -137,13 +137,10 @@ _HEALTH = {
 
 
 def _nav(session: Session) -> dict:
-    """The two things the shell shows on every page: what needs a human, and whether
-    collection is working. Both are counts, so this costs a page load almost nothing."""
-    review = session.scalar(select(func.count()).select_from(Account).where(Account.needs_review))
+    """What the shell shows on every page. One query, so it costs a page load nothing."""
     latest = session.scalar(select(CollectionRun).order_by(CollectionRun.started_at.desc()).limit(1))
     health, tone = _HEALTH.get(latest.status, (latest.status, "warn")) if latest else ("no runs yet", "idle")
     return {
-        "review": review or 0,
         "health": health,
         "health_tone": tone,
         # Local time, to match every timestamp shown in the tables below it.
@@ -156,10 +153,6 @@ def dashboard(request: Request, session: Session = Depends(get_session)):
     totals = {
         "accounts": session.scalar(select(func.count()).select_from(Account)) or 0,
         "active": session.scalar(select(func.count()).select_from(Account).where(Account.is_active))
-        or 0,
-        "review": session.scalar(
-            select(func.count()).select_from(Account).where(Account.needs_review)
-        )
         or 0,
         # What we are tracking, not what we have ever tracked. The sites table is a
         # historical record - a site collected once keeps its rows so its runs and evidence
@@ -271,18 +264,12 @@ def _accounts_from_run(run_id: int):
     return select(Observation.account_id).where(Observation.run_id == run_id)
 
 
-def _account_query(channel: str | None, status: str, q: str | None, run: int | None = None):
+def _account_query(channel: str | None, q: str | None, run: int | None = None):
     stmt = select(Account)
     if run:
         stmt = stmt.where(Account.id.in_(_accounts_from_run(run)))
     if channel:
         stmt = stmt.where(Account.channel == channel)
-    if status == "active":
-        stmt = stmt.where(Account.is_active)
-    elif status == "inactive":
-        stmt = stmt.where(~Account.is_active)
-    elif status == "review":
-        stmt = stmt.where(Account.needs_review)
     if q:
         like = f"%{q.strip()}%"
         stmt = stmt.where(
@@ -293,7 +280,7 @@ def _account_query(channel: str | None, status: str, q: str | None, run: int | N
     return stmt
 
 
-def _payee_query(channel: str | None, status: str, q: str | None, run: int | None = None):
+def _payee_query(channel: str | None, q: str | None, run: int | None = None):
     """Accounts and name-only merchants as one list, newest sighting first.
 
     They are different things — an account is a de-duplicated identity with a number and a
@@ -331,12 +318,6 @@ def _payee_query(channel: str | None, status: str, q: str | None, run: int | Non
         accounts = accounts.where(Account.id.in_(_accounts_from_run(run)))
     if channel:
         accounts = accounts.where(Account.channel == channel)
-    if status == "active":
-        accounts = accounts.where(Account.is_active)
-    elif status == "inactive":
-        accounts = accounts.where(~Account.is_active)
-    elif status == "review":
-        accounts = accounts.where(Account.needs_review)
     if q:
         like = f"%{q.strip()}%"
         accounts = accounts.where(
@@ -347,7 +328,8 @@ def _payee_query(channel: str | None, status: str, q: str | None, run: int | Non
 
     merchants = (
         select(
-            literal(None).label("id"),
+            # The newest sighting of this name, which is the one its page opens on.
+            func.max(MerchantSighting.id).label("id"),
             literal("merchant").label("kind"),
             MerchantSighting.channel.label("channel"),
             literal(None, String).label("number"),
@@ -370,10 +352,6 @@ def _payee_query(channel: str | None, status: str, q: str | None, run: int | Non
     if q:
         merchants = merchants.where(MerchantSighting.merchant_name.like(f"%{q.strip()}%"))
 
-    # A merchant has no status to filter on, so any status filter is a filter to accounts.
-    if status in {"active", "inactive", "review"}:
-        return accounts.order_by(Account.last_seen_at.desc())
-
     combined = union_all(accounts, merchants).subquery()
     return select(combined).order_by(combined.c.last_seen.desc())
 
@@ -386,7 +364,6 @@ def sites_by_id(session: Session) -> dict:
 def payees(
     request: Request,
     channel: str | None = None,
-    status: str = "all",
     q: str | None = None,
     run: int | None = None,
     page: int = 1,
@@ -395,13 +372,13 @@ def payees(
 ):
     """One list of every payee the collector has seen."""
     per_page = per if per in PAGE_SIZES else PAGE_SIZE
-    stmt = _payee_query(channel, status, q, run)
+    stmt = _payee_query(channel, q, run)
     rows, page_info = _paginate(session, stmt, page, per_page=per_page, scalar=False)
     _log(
         session,
         request,
         "search",
-        {"channel": channel, "status": status, "q": q, "run": run, "page": page_info.number},
+        {"channel": channel, "q": q, "run": run, "page": page_info.number},
         page_info.total,
     )
 
@@ -421,7 +398,6 @@ def payees(
             "pagination": page_info,
             "channels": channels,
             "channel": channel,
-            "status": status,
             "q": q or "",
             "run": run,
             "run_row": run_row,
@@ -442,6 +418,61 @@ def accounts_redirect(request: Request):
 @router.get("/merchants", response_class=HTMLResponse)
 def merchants_redirect(request: Request):
     return RedirectResponse("/payees", status_code=307)
+
+
+def _probe_of(blob: Evidence) -> str:
+    """Which probe produced a stored blob. Paths are <slug>/<probe>/<xx>/<sha>.<ext>."""
+    parts = (blob.path or "").split("/")
+    return parts[1] if len(parts) > 2 else ""
+
+
+def _screenshot_of_run(session: Session, run_id: int, probe: str) -> Evidence | None:
+    """The screenshot from one probe of one run."""
+    blobs = session.scalars(
+        select(Evidence)
+        .where(Evidence.run_id == run_id, Evidence.kind == "screenshot")
+        .order_by(Evidence.id.desc())
+    ).all()
+    return next((b for b in blobs if _probe_of(b) == probe), None)
+
+
+@router.get("/merchants/{sighting_id}", response_class=HTMLResponse)
+def merchant_detail(sighting_id: int, request: Request, session: Session = Depends(get_session)):
+    """A name-only payee, and the page it was named on.
+
+    These never carry a number, so there is nothing to look up in the accounts table and
+    nothing to copy onto a blocklist. What there is, is a picture of the checkout that
+    named them - which is the whole of the evidence for a payee of this kind, and until now
+    was captured on every run and shown to nobody.
+    """
+    sighting = session.get(MerchantSighting, sighting_id)
+    if sighting is None:
+        return HTMLResponse("<h1>404</h1><p>No such payee.</p>", status_code=404)
+
+    # Every sighting of this same name on this channel: the name rotates per request, so
+    # the history is the point rather than a single row.
+    sightings = session.scalars(
+        select(MerchantSighting)
+        .where(
+            MerchantSighting.merchant_name == sighting.merchant_name,
+            MerchantSighting.channel == sighting.channel,
+        )
+        .order_by(MerchantSighting.seen_at.desc())
+    ).all()
+
+    newest = sightings[0]
+    _log(session, request, "api_read", {"merchant": sighting.merchant_name}, 1)
+    return templates.TemplateResponse(
+        request,
+        "merchant_detail.html",
+        {
+            "nav": _nav(session),
+            "merchant": newest,
+            "sightings": sightings,
+            "site": session.get(Site, newest.site_id),
+            "screenshot": _screenshot_of_run(session, newest.run_id, newest.probe),
+        },
+    )
 
 
 def _screenshot_for(session: Session, account: Account) -> Evidence | None:
@@ -470,10 +501,6 @@ def _screenshot_for(session: Session, account: Account) -> Evidence | None:
     if not shots:
         return None
 
-    def probe_of(blob: Evidence) -> str:
-        parts = (blob.path or "").split("/")
-        return parts[1] if len(parts) > 2 else ""
-
     for html_blob in (b for b in blobs if b.kind == "html"):
         try:
             body = (settings.evidence_dir / html_blob.path).read_text(
@@ -482,8 +509,8 @@ def _screenshot_for(session: Session, account: Account) -> Evidence | None:
         except OSError:
             continue
         if account.account_number and account.account_number in body:
-            probe = probe_of(html_blob)
-            match = next((s for s in shots if probe_of(s) == probe), None)
+            probe = _probe_of(html_blob)
+            match = next((s for s in shots if _probe_of(s) == probe), None)
             if match is not None:
                 return match
 
@@ -686,18 +713,17 @@ def start_run(request: Request, slug: str = Form(...), session: Session = Depend
 def accounts_csv(
     request: Request,
     channel: str | None = None,
-    status: str = "all",
     q: str | None = None,
     run: int | None = None,
     session: Session = Depends(get_session),
 ):
     """The same rows the table is showing, as a file the AML team can hand on."""
-    rows = session.scalars(_account_query(channel, status, q, run).order_by(Account.channel)).all()
+    rows = session.scalars(_account_query(channel, q, run).order_by(Account.channel)).all()
     _log(
         session,
         request,
         "export",
-        {"channel": channel, "status": status, "q": q, "run": run},
+        {"channel": channel, "q": q, "run": run},
         len(rows),
     )
 

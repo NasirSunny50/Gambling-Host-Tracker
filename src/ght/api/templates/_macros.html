@@ -34,34 +34,12 @@
 <span class="unknown">unknown</span>
 {%- endmacro %}
 
-{# Confidence: a percentage, a three-segment bar, and the word for where the number came
-   from. Never colour alone, and it states its provenance rather than asking the reader to
-   remember what 72% implies. #}
-{% macro confidence(value) -%}
-{% if value is none %}{{ na() }}
-{%- else %}
-{% set tone = "ok" if value >= 0.9 else ("warn" if value >= 0.6 else "bad") -%}
-{% set tier = "exact selector" if value >= 0.9 else ("inferred" if value >= 0.6 else "text sweep") -%}
-{% set fill = 3 if value >= 0.9 else (2 if value >= 0.6 else 1) -%}
-<span class="conf conf-{{ tone }}">
-  <span class="conf-top">
-    <span class="conf-pct">{{ "%.0f%%" | format(value * 100) }}</span>
-    <span class="conf-bars" aria-hidden="true">
-      {% for i in range(3) %}<span class="{{ 'on' if i < fill }}"></span>{% endfor %}
-    </span>
-  </span>
-  <span class="conf-tier">{{ tier }}</span>
-</span>
-{%- endif %}
-{%- endmacro %}
-
-{# What state a payee is in. `name` is not a fourth status of an account — it marks a row
+{# What state a payee is in. `name` is not a third status of an account — it marks a payee
    that never had a number to go active or gone in the first place. #}
 {% macro status_pill(kind) -%}
 {% set map = {
   "active": ("active", "&#9679;", "ok"),
   "gone": ("gone", "&#9675;", "gone"),
-  "review": ("needs review", "&#9650;", "warn"),
   "name": ("name only", "Aa", "name"),
 } -%}
 {% set m = map.get(kind, (kind, "", "gone")) -%}
@@ -70,17 +48,8 @@
 </span>
 {%- endmacro %}
 
-{% macro payee_status(r) -%}
-{% if r.kind == "merchant" %}{{ status_pill("name") }}
-{%- elif r.needs_review %}{{ status_pill("review") }}
-{%- elif r.is_active %}{{ status_pill("active") }}
-{%- else %}{{ status_pill("gone") }}{% endif %}
-{%- endmacro %}
-
 {% macro account_state(a) -%}
-{% if a.needs_review %}{{ status_pill("review") }}
-{%- elif a.is_active %}{{ status_pill("active") }}
-{%- else %}{{ status_pill("gone") }}{% endif %}
+{% if a.is_active %}{{ status_pill("active") }}{% else %}{{ status_pill("gone") }}{% endif %}
 {%- endmacro %}
 
 {# How a run ended. Blocked is kept apart from failed on purpose: it needs a different fix. #}

@@ -150,9 +150,11 @@ def test_a_name_only_payee_reads_as_not_applicable_not_as_missing():
     )
     assert "Not applicable" in html  # the title spelling out what the em-dash means
     assert "unknown" in html
-    assert "name-row" in html  # the tint is what marks a name-only row now
     # The list answers "where did this come from" rather than repeating a status.
     assert "demo-site" in html
+    # Both kinds lead somewhere: a name-only payee to the page that named it.
+    assert 'data-href="/merchants/1"' in html
+    assert 'data-href="/accounts/2"' in html
 
 
 def test_filtered_to_nothing_offers_to_clear_rather_than_looking_empty():
@@ -379,3 +381,40 @@ def test_sites_tracked_follows_the_configs_not_the_database(monkeypatch, tmp_pat
 
     (tmp_path / "two.yaml").write_text(source.replace("demo-site", "demo-site-2"), encoding="utf-8")
     assert len(_runnable_sites()) == 2
+
+
+def test_a_name_only_payee_has_a_page_and_a_picture():
+    """It has no number to copy anywhere, so the screenshot of the checkout that named it
+    is the whole of the evidence - and until it had a page, nobody could see it."""
+    sighting = SimpleNamespace(
+        id=9, merchant_name="ALADDIN EXPRESS", channel="nagad", probe="fast-nagad",
+        run_id=44, site_id=1, seen_at=NOW,
+    )
+    shot = SimpleNamespace(id=316, run_id=44, kind="screenshot", sha256="b" * 64,
+                           path="1xbet-bd/fast-nagad/57/57.png", captured_at=NOW)
+    html = render(
+        "merchant_detail.html",
+        merchant=sighting,
+        sightings=[sighting],
+        site=SimpleNamespace(slug="1xbet-bd", name="1xBet"),
+        screenshot=shot,
+    )
+    assert "ALADDIN EXPRESS" in html
+    assert "/evidence/316.png" in html
+    assert "Not applicable" in html  # there is no account number, and it says so
+    assert 'data-copy="ALADDIN EXPRESS"' in html
+
+
+def test_a_name_only_payee_says_when_no_picture_was_kept():
+    sighting = SimpleNamespace(
+        id=9, merchant_name="ASHA BEKARY", channel="nagad", probe="fast-nagad",
+        run_id=40, site_id=1, seen_at=NOW,
+    )
+    html = render(
+        "merchant_detail.html",
+        merchant=sighting,
+        sightings=[sighting],
+        site=SimpleNamespace(slug="1xbet-bd", name="1xBet"),
+        screenshot=None,
+    )
+    assert "No screenshot was captured" in html

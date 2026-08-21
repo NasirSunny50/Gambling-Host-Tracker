@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{% import "_macros.html" as ui %}
+{% set page = "payees" %}
+{% block title %}{{ merchant.merchant_name }} — Host Tracker{% endblock %}
+{% block heading %}Payee detail{% endblock %}
+{% block subtitle %}A payee named at checkout, and the page that named it{% endblock %}
+{% block body %}
+
+<p class="back"><a href="/payees">&lsaquo; Back to payees</a></p>
+
+<div class="detail">
+  <div class="col">
+    <section class="panel">
+      <div class="ident">
+        <div class="ident-ch">{{ ui.channel(merchant.channel) }}</div>
+        <div class="ident-name">{{ merchant.merchant_name }}</div>
+      </div>
+      <dl class="kv">
+        <div class="row"><dt>Account number</dt><dd>{{ ui.na() }}</dd></div>
+        <div class="row"><dt>Site</dt><dd>{{ site.slug if site else ui.unknown() }}</dd></div>
+        <div class="row"><dt>Method</dt><dd class="mono">{{ merchant.probe }}</dd></div>
+        <div class="row"><dt>First seen</dt><dd class="mono">{{ sightings[-1].seen_at | stamp }}</dd></div>
+        <div class="row"><dt>Last seen</dt><dd class="mono">{{ merchant.seen_at | stamp }}</dd></div>
+        <div class="row"><dt>Times seen</dt><dd class="mono">{{ sightings | length }}</dd></div>
+      </dl>
+    </section>
+
+    <button class="btn copy-wide" type="button"
+            data-copy="{{ merchant.merchant_name }}">&#10696; Copy name</button>
+
+    <section class="panel">
+      <h2>Every sighting</h2>
+      {% for s in sightings %}
+      <div class="site-row">
+        <span class="mono dim">{{ s.seen_at | stamp }}</span>
+        <span class="tag" style="margin-left:auto">run #{{ s.run_id }}</span>
+      </div>
+      {% endfor %}
+    </section>
+
+    <p class="why">
+      This payee never shows a number. The method hands off to the provider&rsquo;s own
+      checkout, which names a business and asks the payer for <em>their</em> number instead.
+      The name changes on every deposit request, so it is never marked gone &mdash; the value
+      is the pool of names building up over time.
+    </p>
+  </div>
+
+  <div class="col">
+    <section class="panel">
+      <h2>Seen on the site</h2>
+      {% if screenshot %}
+        {# For a payee with no number, this picture is the whole of the evidence: there is
+           nothing to copy onto a blocklist, only the checkout that named them. #}
+        <a class="shot" href="/evidence/{{ screenshot.id }}.png" target="_blank" rel="noopener">
+          <img src="/evidence/{{ screenshot.id }}.png"
+               alt="The checkout page naming {{ merchant.merchant_name }}">
+        </a>
+        <div class="shot-note">
+          Captured {{ screenshot.captured_at | stamp }} &middot; run #{{ screenshot.run_id }}
+          &middot; <span class="mono">sha256:{{ screenshot.sha256[:12] }}&hellip;</span>
+        </div>
+      {% else %}
+        <div class="quiet-empty">No screenshot was captured on the run that named this payee.</div>
+      {% endif %}
+    </section>
+  </div>
+</div>
+
+<style>
+  .back { margin:0 0 14px; font-size:13px; }
+  .back a { color:var(--text-2); }
+  .detail { display:grid; grid-template-columns:1fr 1.5fr; gap:16px; align-items:start; }
+  .detail .col { display:flex; flex-direction:column; gap:16px; min-width:0; }
+  @media (max-width:1000px) { .detail { grid-template-columns:1fr; } }
+
+  .ident { padding:18px 16px; border-bottom:1px solid var(--border); }
+  .ident-ch { margin-bottom:12px; }
+  .ident-name { font-size:20px; font-weight:700; letter-spacing:-.2px; word-break:break-word; }
+  .copy-wide { justify-content:center; height:40px; }
+
+  .shot { display:block; background:var(--surface-2); }
+  .shot img { display:block; width:100%; height:auto; }
+  .shot-note { padding:10px 16px; font-size:12px; color:var(--text-3);
+               border-top:1px solid var(--border); }
+
+  .site-row { display:flex; align-items:center; gap:12px; padding:11px 16px;
+              border-bottom:1px solid var(--border); font-size:13px; }
+  .site-row:last-child { border-bottom:none; }
+
+  .why { margin:0; font-size:12.5px; color:var(--text-3); line-height:1.5; }
+  .quiet-empty { padding:28px 20px; color:var(--text-2); text-align:center; font-size:13px; }
+</style>
+
+{% endblock %}

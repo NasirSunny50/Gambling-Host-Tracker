@@ -14,10 +14,7 @@
       <div class="ident">
         <div class="ident-ch">{{ ui.channel(account.channel) }}</div>
         <div class="ident-num mono">{{ account.account_number }}</div>
-        <div class="ident-state">
-          {{ ui.account_state(account) }}
-          {{ ui.confidence(account.confidence) }}
-        </div>
+        <div class="ident-state">{{ ui.account_state(account) }}</div>
       </div>
       <dl class="kv">
         <div class="row"><dt>Holder name</dt><dd>{{ account.holder_name or ui.unknown() }}</dd></div>
@@ -77,17 +74,16 @@
 
     <section class="panel">
       <h2>Sightings &mdash; {{ observations | length }}</h2>
-      {% call ui.table(["When", "#Run", "Raw text", "Origin", "Confidence"]) %}
+      {% call ui.table(["When", "#Run", "Raw text", "Origin"]) %}
         {% for o in observations %}
         <tr>
           <td class="dim mono nowrap">{{ o.observed_at | stamp }}</td>
           <td class="num mono">#{{ o.run_id }}</td>
           <td class="mono"><span class="clip" title="{{ o.raw_text }}">{{ o.raw_text[:70] }}</span></td>
           <td class="dim mono"><span class="clip" title="{{ o.origin }}">{{ o.origin[:44] }}</span></td>
-          <td>{{ ui.confidence(o.confidence) }}</td>
         </tr>
         {% else %}
-        <tr><td colspan="5"><div class="quiet-empty">No sightings recorded.</div></td></tr>
+        <tr><td colspan="4"><div class="quiet-empty">No sightings recorded.</div></td></tr>
         {% endfor %}
       {% endcall %}
     </section>
