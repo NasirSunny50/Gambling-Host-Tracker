@@ -108,6 +108,16 @@ def _stamp(value: datetime | None) -> str:
     return value.astimezone(DHAKA).strftime("%d/%m/%Y %I:%M %p")
 
 
+def _day(value: datetime | None) -> str:
+    """Just the date, for a figure caption where the hour would be noise."""
+    if value is None:
+        return "—"
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=UTC)
+    return value.astimezone(DHAKA).strftime("%d/%m/%Y")
+
+
+templates.env.filters["day"] = _day
 templates.env.filters["age"] = _age
 templates.env.filters["stamp"] = _stamp
 templates.env.filters["channel"] = lambda value: CHANNEL_LABELS.get(value, value)
@@ -156,7 +166,12 @@ def dashboard(request: Request, session: Session = Depends(get_session)):
         # still mean something - so counting it answers a different question than the one
         # the figure asks. The configs on disk are the targets.
         "sites": len(_runnable_sites()),
+        # How much work has gone in. An account count on its own says nothing about
+        # whether the collector has been looking - thirty accounts from two runs and from
+        # two hundred are very different pictures of a site.
+        "runs": session.scalar(select(func.count()).select_from(CollectionRun)) or 0,
     }
+    first_run_at = session.scalar(select(func.min(CollectionRun.started_at)))
 
     by_channel = session.execute(
         select(Account.channel, func.count())
@@ -178,6 +193,7 @@ def dashboard(request: Request, session: Session = Depends(get_session)):
             "nav": _nav(session),
             "totals": totals,
             "by_channel": by_channel,
+            "first_run_at": first_run_at,
             "runs": runs,
             "newest": newest,
             "sites": sites,

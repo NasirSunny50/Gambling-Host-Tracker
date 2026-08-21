@@ -95,22 +95,30 @@ SITES = {1: SimpleNamespace(id=1, slug="demo-site", name="Demo Site")}
 
 
 def test_overview_with_data_shows_the_figures():
+    """What has been collected, and how much looking it took. An account count alone says
+    nothing about whether the collector has been running."""
     html = render(
         "dashboard.html",
-        totals={"accounts": 25, "active": 12, "review": 3, "sites": 2},
+        totals={"accounts": 25, "active": 12, "review": 3, "sites": 2, "runs": 42},
         by_channel=[("bkash", 8), ("nagad", 4)],
+        first_run_at=NOW,
         runs=[run_row()],
         newest=[account()],
         sites=SITES,
     )
-    assert "Active accounts" in html
-    assert ">12<" in html
+    assert "Accounts found" in html
+    assert ">25<" in html
+    assert "Collections run" in html
+    assert ">42<" in html
+    # NOW is 18:26 UTC, which is the 21st in Dhaka - the caption follows the reader's day,
+    # not the server's.
+    assert "since 21/08/2026" in html
 
 
 def test_overview_before_anything_is_collected_offers_a_first_run():
     html = render(
         "dashboard.html",
-        totals={"accounts": 0, "active": 0, "review": 0, "sites": 0},
+        totals={"accounts": 0, "active": 0, "review": 0, "sites": 0, "runs": 0},
         by_channel=[],
         runs=[],
         newest=[],

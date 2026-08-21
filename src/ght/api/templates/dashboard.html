@@ -17,8 +17,9 @@
 {% else %}
 
 <div class="figures">
-  {{ ui.figure(totals.active, "Active accounts", "seen in the last 48 hours", href="/payees?status=active") }}
-  {{ ui.figure(totals.accounts, "Seen all-time", "incl. gone and name-only", href="/payees") }}
+  {{ ui.figure(totals.accounts, "Accounts found", "unique numbers, all time", href="/payees") }}
+  {{ ui.figure(totals.runs, "Collections run",
+               ("since " ~ (first_run_at | day)) if first_run_at else "none yet", href="/runs") }}
   {{ ui.figure(totals.review, "Needs review", "low-confidence finds", href="/payees?status=review",
                tone="warn" if totals.review else "") }}
   {{ ui.figure(totals.sites, "Sites tracked", "configured targets", href="/runs") }}
