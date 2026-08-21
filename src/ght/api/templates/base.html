@@ -79,12 +79,8 @@
     .side nav .label { flex:1; }
     .side nav .badge-n { font-size:11px; font-weight:700; color:var(--warn);
                          background:var(--warn-bg); padding:1px 6px; border-radius:999px; }
-    .side-foot { margin-top:auto; padding:12px; border-top:1px solid var(--border);
-                 display:flex; flex-direction:column; gap:8px; }
-    .side-foot .quiet { color:var(--text-2); font-size:12px; padding:6px 8px; border-radius:6px; }
-    .side-foot .quiet:hover { background:var(--surface-2); color:var(--text); text-decoration:none; }
-    .side-foot button { width:100%; justify-content:center; height:32px; font-size:12px;
-                        background:var(--surface-2); color:var(--text-2); }
+    .theme-toggle { height:32px; padding:0 12px; font-size:12px; background:var(--surface-2);
+                    color:var(--text-2); }
 
     /* ---- layout ----------------------------------------------------------- */
     .page { flex:1; min-width:0; display:flex; flex-direction:column; }
@@ -293,7 +289,6 @@
               align-items:center; border-right:none; border-bottom:1px solid var(--border); }
       .side-brand { border-bottom:none; }
       .side nav { flex-direction:row; }
-      .side-foot { margin-top:0; border-top:none; flex-direction:row; }
       main { padding:18px; }
     }
   </style>
@@ -323,12 +318,6 @@
         <span class="glyph" aria-hidden="true">&#9654;</span><span class="label">Runs</span>
       </a>
     </nav>
-    <div class="side-foot">
-      <a class="quiet" href="/components">Components &amp; notes</a>
-      <button type="button" onclick="toggleTheme()" title="Toggle light / dark">
-        <span id="theme-label">&#9790; Dark</span>
-      </button>
-    </div>
   </aside>
 
   <div class="page">
@@ -339,26 +328,54 @@
       </div>
       <div class="meta">
         <span class="clock" id="clock">{{ nav.now }}</span>
-        <span class="rule"></span>
+        {# A run in flight is the one thing worth interrupting the header for: it is
+           happening now, it is finite, and it links to where it is happening. #}
         {% if job and job.is_running %}
+          <span class="rule"></span>
           <a class="health is-live" href="/runs"><span class="dot"></span>collecting {{ job.current.slug }}&hellip;</a>
-        {% else %}
-          <span class="health is-{{ nav.health_tone }}"><span class="dot"></span>{{ nav.health }}</span>
         {% endif %}
+        <span class="rule"></span>
+        <button type="button" class="theme-toggle" onclick="toggleTheme()" title="Toggle light / dark">
+          <span id="theme-label">&#9790; Dark</span>
+        </button>
       </div>
     </header>
     <main>{% block body %}{% endblock %}</main>
   </div>
 
   <script>
-    // Copy an account number to the clipboard. Vanilla, no library — the page must stay
-    // self-contained. Falls back silently where the clipboard API is unavailable.
+    // Copy to the clipboard. Vanilla, no library — the page must stay self-contained.
+    //
+    // The modern API refuses in ways that are invisible from here (an unfocused document
+    // rejects outright), and a copy button that quietly does nothing is worse than none at
+    // all: the reader walks away believing they have the number. So the old execCommand
+    // path stands behind it, and the button always says which of the two happened.
     function copyText(btn, text) {
+      function done(ok) {
+        var prev = btn.getAttribute("data-glyph") || btn.textContent;
+        btn.setAttribute("data-glyph", prev);
+        btn.textContent = ok ? "✓" : "✕";
+        btn.title = ok ? "Copied" : "Could not copy — select and copy by hand";
+        setTimeout(function () { btn.textContent = prev; }, 1200);
+      }
+      function legacy() {
+        try {
+          var box = document.createElement("textarea");
+          box.value = text;
+          box.setAttribute("readonly", "");
+          box.style.position = "fixed";
+          box.style.opacity = "0";
+          document.body.appendChild(box);
+          box.select();
+          var ok = document.execCommand("copy");
+          document.body.removeChild(box);
+          done(ok);
+        } catch (e) { done(false); }
+      }
       if (navigator.clipboard) {
-        navigator.clipboard.writeText(text).then(function () {
-          var prev = btn.textContent; btn.textContent = "✓";
-          setTimeout(function () { btn.textContent = prev; }, 1000);
-        });
+        navigator.clipboard.writeText(text).then(function () { done(true); }, legacy);
+      } else {
+        legacy();
       }
     }
     function paintThemeLabel() {
@@ -386,6 +403,16 @@
                          " " + pad(d.getHours()) + ":" + pad(d.getMinutes());
       }, 10000);
     })();
+    // Anything carrying data-copy copies it. The value stays an attribute rather than
+    // being pasted into an onclick, so a quote in a collected merchant name cannot break
+    // the markup around it.
+    document.addEventListener("click", function (e) {
+      var btn = e.target.closest && e.target.closest("[data-copy]");
+      if (!btn) return;
+      e.preventDefault();
+      e.stopPropagation();
+      copyText(btn, btn.getAttribute("data-copy"));
+    });
     // Whole-row navigation on the payee table. The number inside the row stays a real
     // link, so middle-click and keyboard use are unaffected; this only widens the target.
     document.addEventListener("click", function (e) {

@@ -44,33 +44,26 @@
 
 {% if rows %}
 <div class="panel">
-  {% call ui.table(["Channel", "Number", "Name", "Bank", "Confidence", "#Seen", "Last seen", "Status"]) %}
+  {% call ui.table(["Channel", "Number", "Name", "Bank", "Site", "Confidence", "#Seen", "Last seen"]) %}
     {% for r in rows %}
     <tr class="{{ 'name-row' if r.kind == 'merchant' else 'linked' }}"
         {% if r.kind != "merchant" %}data-href="/accounts/{{ r.id }}"{% endif %}>
       <td>{{ ui.channel(r.channel) }}</td>
       <td>{% if r.number %}{{ ui.number_text(r.id, r.number) }}{% else %}{{ ui.na() }}{% endif %}</td>
-      <td>{% if r.name %}<span class="clip" title="{{ r.name }}">{{ r.name }}</span>
+      <td>{% if r.name %}{{ ui.copyable(r.name) }}
           {%- elif r.kind == "merchant" %}{{ ui.na() }}{% else %}{{ ui.unknown() }}{% endif %}</td>
       <td>{% if r.bank %}<span class="clip dim">{{ r.bank }}</span>
           {%- elif r.kind == "merchant" %}{{ ui.na() }}{% else %}{{ ui.unknown() }}{% endif %}</td>
+      <td class="dim nowrap">{{ r.site or ui.unknown() }}</td>
       <td>{{ ui.confidence(r.confidence) }}</td>
       <td class="num mono dim">{{ r.times }}</td>
       <td class="dim mono nowrap">{{ r.last_seen | stamp }}</td>
-      <td>{{ ui.payee_status(r) }}</td>
     </tr>
     {% endfor %}
   {% endcall %}
   {{ ui.pager(p, "/payees", {"q": q, "channel": channel or "", "status": status, "run": run or "", "per": per},
               page_sizes=page_sizes, per=per, noun="payees" ~ (" (filtered)" if filtered else "")) }}
 </div>
-
-<p class="footnote">
-  A payee with no number came from a method that hands off to the payment provider&rsquo;s own
-  checkout, which names a business instead. Those names change on every deposit request, so
-  they are never marked gone &mdash; the value is the pool of names building up over time.
-</p>
-
 {% elif run_row %}
   {{ ui.empty(
       "Run #" ~ run_row.id ~ " collected no payees",
@@ -110,7 +103,6 @@
                 border:1px solid var(--accent); font-size:13px; }
   .run-filter .lead { font-weight:700; color:var(--accent); }
   .run-filter .btn { margin-left:auto; height:32px; }
-  .footnote { margin:14px 0 0; font-size:12.5px; color:var(--text-3); max-width:760px; }
 </style>
 
 {% endblock %}

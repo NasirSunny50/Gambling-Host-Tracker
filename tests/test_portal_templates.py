@@ -77,6 +77,7 @@ def payee_row(**kw):
         "last_seen": NOW,
         "is_active": True,
         "needs_review": False,
+        "site": "demo-site",
     }
     return SimpleNamespace(**{**fields, **kw})
 
@@ -139,10 +140,11 @@ def test_a_name_only_payee_reads_as_not_applicable_not_as_missing():
         per=10,
         page_sizes=(10, 25),
     )
-    assert "name only" in html
     assert "Not applicable" in html  # the title spelling out what the em-dash means
     assert "unknown" in html
-    assert "name-row" in html
+    assert "name-row" in html  # the tint is what marks a name-only row now
+    # The list answers "where did this come from" rather than repeating a status.
+    assert "demo-site" in html
 
 
 def test_filtered_to_nothing_offers_to_clear_rather_than_looking_empty():
@@ -179,34 +181,34 @@ def test_nothing_collected_yet_is_not_the_same_as_no_matches():
 # ----------------------------------------------------------------------- detail
 
 
-def test_detail_says_what_the_saved_pages_are_for():
+def test_detail_shows_the_number_where_it_was_published():
+    """A reviewer who does not read HTML needs to see the number on the site, not a list
+    of digests. The digest still travels with the picture, so it stays checkable."""
+    shot = SimpleNamespace(id=42, run_id=7, kind="screenshot", path="s/p/ab/abc.png",
+                           sha256="a" * 64, bytes=1234, captured_at=NOW)
     html = render(
         "account_detail.html",
         account=account(),
         observations=[],
         sites=[],
-        evidence=[
-            SimpleNamespace(run_id=7, kind="html", path="evidence/x.html", sha256="a" * 64,
-                            bytes=1234, captured_at=NOW)
-        ],
-        evidence_total=1,
-        evidence_shown=20,
+        evidence_total=16,
+        screenshot=shot,
     )
-    assert "Pages saved" in html
-    assert "SHA-256" in html
+    assert '/evidence/42.png' in html
+    assert "sha256:aaaaaaaaaaaa" in html
+    assert "16 pages stored" in html
 
 
-def test_detail_states_the_true_total_when_it_lists_only_the_recent_ones():
+def test_detail_says_so_plainly_when_no_picture_was_captured():
     html = render(
         "account_detail.html",
         account=account(),
         observations=[],
         sites=[],
-        evidence=[],
-        evidence_total=78,
-        evidence_shown=20,
+        evidence_total=0,
+        screenshot=None,
     )
-    assert "20 most recent of 78" in html
+    assert "No screenshot was captured" in html
 
 
 # ----------------------------------------------------------------------- runs

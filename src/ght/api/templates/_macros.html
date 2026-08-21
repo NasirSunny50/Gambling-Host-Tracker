@@ -106,7 +106,20 @@
 {% macro number_text(account_id, value) -%}
 <span class="num-cell">
   <a href="/accounts/{{ account_id }}">{{ value }}</a>
-  <button class="copy" type="button" title="Copy number" onclick="copyText(this, '{{ value }}')">&#10696;</button>
+  <button class="copy" type="button" title="Copy number" data-copy="{{ value }}">&#10696;</button>
+</span>
+{%- endmacro %}
+
+{# Text with a one-click copy beside it. A holder name gets typed into a case file or a
+   bank's system, and retyping a Bengali business name by hand is where mistakes come from.
+
+   The value travels in a data attribute rather than inside an onclick: these strings are
+   collected from a hostile site, and building a JavaScript literal out of one is how a
+   quote in a merchant name turns into broken markup. #}
+{% macro copyable(value, label="Copy name") -%}
+<span class="num-cell">
+  <span class="clip" title="{{ value }}">{{ value }}</span>
+  <button class="copy" type="button" title="{{ label }}" data-copy="{{ value }}">&#10696;</button>
 </span>
 {%- endmacro %}
 

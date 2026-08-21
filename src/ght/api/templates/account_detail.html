@@ -32,7 +32,7 @@
     </section>
 
     <button class="btn copy-wide" type="button"
-            onclick="copyText(this, '{{ account.account_number }}')">&#10696; Copy account number</button>
+            data-copy="{{ account.account_number }}">&#10696; Copy account number</button>
 
     <section class="panel">
       <h2>Seen on {{ sites | length }} site{{ "" if sites | length == 1 else "s" }}</h2>
@@ -55,29 +55,23 @@
 
   <div class="col">
     <section class="panel">
-      <h2>Pages saved &mdash; {{ evidence_total }}</h2>
-      <p class="panel-note">
-        A copy of exactly what the site returned on each run that showed this number, stored
-        byte-for-byte and hashed with SHA-256. It is what lets someone downstream confirm the
-        number was really advertised, on that page, on that date &mdash; long after the site
-        has rotated it away. <code>ght verify-evidence</code> re-hashes these against the
-        digests below.
-      </p>
-      {% for e in evidence %}
-      <div class="ev">
-        <div class="ev-top">
-          <span class="mono strong">{{ e.captured_at | stamp }}</span>
-          <span class="mono mute">run #{{ e.run_id }} &middot; {{ e.kind }} &middot; {{ "{:,}".format(e.bytes) }} bytes</span>
+      <h2>Seen on the site</h2>
+      {% if screenshot %}
+        {# One picture of the number where it was published beats a list of digests: this
+           is the thing a reviewer can look at and believe without reading any markup. The
+           full page bytes are still stored and still hashed — this is the readable face
+           of them, not a replacement. #}
+        <a class="shot" href="/evidence/{{ screenshot.id }}.png" target="_blank" rel="noopener">
+          <img src="/evidence/{{ screenshot.id }}.png"
+               alt="The deposit page showing {{ account.account_number }}">
+        </a>
+        <div class="shot-note">
+          Captured {{ screenshot.captured_at | stamp }} &middot; run #{{ screenshot.run_id }}
+          &middot; <span class="mono">sha256:{{ screenshot.sha256[:12] }}&hellip;</span>
+          &middot; {{ evidence_total }} page{{ "" if evidence_total == 1 else "s" }} stored for this account
         </div>
-        <div class="ev-path mono">{{ e.path }}</div>
-        <div class="ev-hash mono mute">sha256:{{ e.sha256[:16] }}&hellip;{{ e.sha256[-8:] }}</div>
-      </div>
       {% else %}
-      <div class="quiet-empty">No pages were saved for the runs that saw this account.</div>
-      {% endfor %}
-      {% if evidence_total > evidence_shown %}
-      <div class="ev-more">Showing the {{ evidence_shown }} most recent of {{ evidence_total }}.
-        All of them are on disk and covered by <code>ght verify-evidence</code>.</div>
+        <div class="quiet-empty">No screenshot was captured on the runs that saw this account.</div>
       {% endif %}
     </section>
 
@@ -118,16 +112,10 @@
                 border-bottom:1px solid var(--border); background:var(--surface-2); }
   .panel-note code { font-family:var(--mono); font-size:12px; }
 
-  .ev { padding:14px 16px; border-bottom:1px solid var(--border); display:flex;
-        flex-direction:column; gap:6px; }
-  .ev:last-child { border-bottom:none; }
-  .ev-top { display:flex; justify-content:space-between; align-items:center; gap:12px;
-            flex-wrap:wrap; font-size:12.5px; }
-  .ev-top .strong { font-weight:600; }
-  .ev-path { font-size:12px; color:var(--text-2); word-break:break-all; }
-  .ev-hash { font-size:11.5px; }
-  .ev-more { padding:12px 16px; font-size:12.5px; color:var(--text-2); background:var(--surface-2); }
-  .ev-more code { font-family:var(--mono); font-size:12px; }
+  .shot { display:block; background:var(--surface-2); }
+  .shot img { display:block; width:100%; height:auto; }
+  .shot-note { padding:10px 16px; font-size:12px; color:var(--text-3);
+               border-top:1px solid var(--border); }
 
   .site-row { display:flex; align-items:center; gap:12px; padding:12px 16px;
               border-bottom:1px solid var(--border); }

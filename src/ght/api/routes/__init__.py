@@ -11,17 +11,23 @@ import csv
 import io
 import re
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, timezone
 from math import ceil
 
 from fastapi import APIRouter, Depends, Form, Request
-from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import (
+    FileResponse,
+    HTMLResponse,
+    RedirectResponse,
+    StreamingResponse,
+)
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import String, func, literal, select, union_all
 from sqlalchemy.orm import Session
 
 from ght.api import TEMPLATES_DIR
 from ght.api.jobs import manager
+from ght.config import settings
 from ght.db import SessionLocal
 from ght.models import (
     AccessLog,
@@ -82,14 +88,24 @@ def _age(value: datetime | None) -> str:
     return f"{delta.days}d ago"
 
 
+# Everything shown in this portal is read in Bangladesh, about a Bangladeshi site, by
+# people who will quote these times to a Bangladeshi bank. A fixed +06:00 rather than a
+# named zone: the country has no daylight saving, so the offset is the whole truth and it
+# does not depend on a tz database being installed on the machine.
+DHAKA = timezone(timedelta(hours=6))
+
+
 def _stamp(value: datetime | None) -> str:
-    """An exact timestamp. Relative ages read nicely but hide when something happened,
-    which is the thing a case file has to state."""
+    """An exact timestamp, in the day-month-year order the reader writes dates in.
+
+    Relative ages read nicely but hide when something happened, which is the thing a case
+    file has to state.
+    """
     if value is None:
         return "—"
     if value.tzinfo is None:
         value = value.replace(tzinfo=UTC)
-    return value.astimezone().strftime("%Y-%m-%d %H:%M")
+    return value.astimezone(DHAKA).strftime("%d/%m/%Y %I:%M %p")
 
 
 templates.env.filters["age"] = _age
@@ -121,7 +137,7 @@ def _nav(session: Session) -> dict:
         "health": health,
         "health_tone": tone,
         # Local time, to match every timestamp shown in the tables below it.
-        "now": datetime.now(UTC).astimezone().strftime("%Y-%m-%d %H:%M"),
+        "now": datetime.now(DHAKA).strftime("%d/%m/%Y %I:%M %p"),
     }
 
 
@@ -265,6 +281,18 @@ def _payee_query(channel: str | None, status: str, q: str | None, run: int | Non
     brings is the same: who is receiving the deposits. A union keeps them in one ordered,
     pageable list without pretending a merchant has fields it does not.
     """
+    # Which site advertised it. Where an account has been seen on several brands the most
+    # recent one is shown - the same account across brands is the strongest signal here, and
+    # the detail page lists them all.
+    account_site = (
+        select(Site.slug)
+        .join(AccountSite, AccountSite.site_id == Site.id)
+        .where(AccountSite.account_id == Account.id)
+        .order_by(AccountSite.last_seen_at.desc())
+        .limit(1)
+        .scalar_subquery()
+        .label("site")
+    )
     accounts = select(
         Account.id.label("id"),
         literal("account").label("kind"),
@@ -277,6 +305,7 @@ def _payee_query(channel: str | None, status: str, q: str | None, run: int | Non
         Account.last_seen_at.label("last_seen"),
         Account.is_active.label("is_active"),
         Account.needs_review.label("needs_review"),
+        account_site,
     )
     if run:
         accounts = accounts.where(Account.id.in_(_accounts_from_run(run)))
@@ -309,7 +338,9 @@ def _payee_query(channel: str | None, status: str, q: str | None, run: int | Non
             func.max(MerchantSighting.seen_at).label("last_seen"),
             literal(None).label("is_active"),
             literal(None).label("needs_review"),
+            func.min(Site.slug).label("site"),
         )
+        .join(Site, Site.id == MerchantSighting.site_id)
         .group_by(MerchantSighting.merchant_name, MerchantSighting.channel)
     )
     if run:
@@ -393,8 +424,71 @@ def merchants_redirect(request: Request):
     return RedirectResponse("/payees", status_code=307)
 
 
-# How many saved pages the detail view lists before it stops and gives the total instead.
-EVIDENCE_SHOWN = 20
+def _screenshot_for(session: Session, account: Account) -> Evidence | None:
+    """The picture of this number on the site, from the last run that saw it.
+
+    A page of hashes proves the number was published; a screenshot *shows* it, which is
+    what a reviewer who does not read HTML actually needs. Finding the right one matters:
+    a run captures every method, so the screenshot has to come from the method whose page
+    carried this number. Evidence paths are ``<slug>/<probe>/<xx>/<sha>.<ext>``, so the
+    stored HTML that contains the number names the probe, and the screenshot beside it in
+    the same probe folder is the picture of that page.
+    """
+    latest = session.scalar(
+        select(Observation)
+        .where(Observation.account_id == account.id)
+        .order_by(Observation.observed_at.desc())
+        .limit(1)
+    )
+    if latest is None:
+        return None
+
+    blobs = session.scalars(
+        select(Evidence).where(Evidence.run_id == latest.run_id).order_by(Evidence.id.desc())
+    ).all()
+    shots = [b for b in blobs if b.kind == "screenshot"]
+    if not shots:
+        return None
+
+    def probe_of(blob: Evidence) -> str:
+        parts = (blob.path or "").split("/")
+        return parts[1] if len(parts) > 2 else ""
+
+    for html_blob in (b for b in blobs if b.kind == "html"):
+        try:
+            body = (settings.evidence_dir / html_blob.path).read_text(
+                encoding="utf-8", errors="ignore"
+            )
+        except OSError:
+            continue
+        if account.account_number and account.account_number in body:
+            probe = probe_of(html_blob)
+            match = next((s for s in shots if probe_of(s) == probe), None)
+            if match is not None:
+                return match
+
+    # No stored page names it - a number can be normalised away from the exact digits on
+    # the page - so fall back to the run's own first screenshot rather than showing nothing.
+    return shots[-1]
+
+
+@router.get("/evidence/{evidence_id}.png")
+def evidence_image(evidence_id: int, request: Request, session: Session = Depends(get_session)):
+    """Serve one stored screenshot.
+
+    Addressed by database id, never by a path from the URL: the id is looked up, and the
+    file it names is required to resolve inside the evidence directory. A portal that
+    accepted a path here would hand out any file on the machine to anyone who reached it.
+    """
+    blob = session.get(Evidence, evidence_id)
+    if blob is None or blob.kind != "screenshot":
+        return HTMLResponse("<h1>404</h1><p>No such screenshot.</p>", status_code=404)
+
+    root = settings.evidence_dir.resolve()
+    path = (root / blob.path).resolve()
+    if not path.is_relative_to(root) or not path.exists():
+        return HTMLResponse("<h1>404</h1><p>The stored file is missing.</p>", status_code=404)
+    return FileResponse(path, media_type="image/png")
 
 
 @router.get("/accounts/{account_id}", response_class=HTMLResponse)
@@ -416,25 +510,18 @@ def account_detail(account_id: int, request: Request, session: Session = Depends
         .where(AccountSite.account_id == account_id)
     ).all()
 
-    # Every page saved by every run that saw this account. A long-lived number can have
-    # hundreds, so the page shows the most recent and states the true total rather than
-    # rendering the lot.
+    # How much is stored behind this account. The page shows one screenshot rather than the
+    # list - a reviewer wants to see the number on the site, not read digests - so this is
+    # only the count that says how much is on disk being hashed.
     run_ids = {o.run_id for o in observations}
-    evidence_total = 0
-    evidence = []
-    if run_ids:
-        evidence_total = (
-            session.scalar(
-                select(func.count()).select_from(Evidence).where(Evidence.run_id.in_(run_ids))
-            )
-            or 0
+    evidence_total = (
+        session.scalar(
+            select(func.count()).select_from(Evidence).where(Evidence.run_id.in_(run_ids))
         )
-        evidence = session.scalars(
-            select(Evidence)
-            .where(Evidence.run_id.in_(run_ids))
-            .order_by(Evidence.captured_at.desc())
-            .limit(EVIDENCE_SHOWN)
-        ).all()
+        or 0
+        if run_ids
+        else 0
+    )
 
     _log(session, request, "api_read", {"account_id": account_id}, 1)
     return templates.TemplateResponse(
@@ -445,9 +532,8 @@ def account_detail(account_id: int, request: Request, session: Session = Depends
             "account": account,
             "observations": observations,
             "sites": sites,
-            "evidence": evidence,
             "evidence_total": evidence_total,
-            "evidence_shown": EVIDENCE_SHOWN,
+            "screenshot": _screenshot_for(session, account),
         },
     )
 
