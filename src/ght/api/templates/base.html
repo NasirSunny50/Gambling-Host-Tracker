@@ -69,7 +69,8 @@
     .side { width:224px; flex:none; background:var(--surface); border-right:1px solid var(--border);
             display:flex; flex-direction:column; position:sticky; top:0; height:100vh; }
     .side-brand { padding:18px 18px 14px; border-bottom:1px solid var(--border);
-                  display:flex; align-items:center; gap:10px; }
+                  display:flex; align-items:center; gap:10px; color:var(--text); }
+    .side-brand:hover { text-decoration:none; background:var(--surface-2); }
     .side-brand .mark { width:32px; height:32px; border-radius:8px; background:var(--accent);
                         display:inline-flex; align-items:center; justify-content:center; flex:none; }
     .side-brand .who { display:flex; flex-direction:column; line-height:1.15; }
@@ -300,7 +301,7 @@
 </head>
 <body>
   <aside class="side">
-    <div class="side-brand">
+    <a class="side-brand" href="/" title="Overview">
       <span class="mark">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
           <path d="M12 2.5l7.5 3v5c0 4.6-3.1 8-7.5 9.5-4.4-1.5-7.5-4.9-7.5-9.5v-5l7.5-3z" fill="none" stroke="var(--accent-text)" stroke-width="1.6" stroke-linejoin="round"/>
@@ -310,7 +311,7 @@
         </svg>
       </span>
       <span class="who"><strong>Host Tracker</strong><span class="tagline">Payee intelligence</span></span>
-    </div>
+    </a>
     <nav>
       <a href="/" class="{{ 'on' if page == 'dashboard' }}">
         <span class="glyph" aria-hidden="true">&#9638;</span><span class="label">Overview</span>

@@ -353,3 +353,21 @@ def test_a_run_still_going_is_never_taken_as_finished():
     manager._current = RunInfo(slug="demo-site", started_at=NOW)
 
     assert manager.take_finished() is None
+
+
+def test_sites_tracked_follows_the_configs_not_the_database(monkeypatch, tmp_path):
+    """The sites table is a historical record: a site collected once keeps its rows so its
+    runs and evidence still mean something. Counting it reported "2 sites tracked" for a
+    fixture nobody tracks any more, so the figure reads the configs on disk instead."""
+    from pathlib import Path
+
+    from ght.api.routes import _runnable_sites
+    from ght.config import settings
+
+    source = Path("tests/fixtures/demo-site.yaml").read_text(encoding="utf-8")
+    (tmp_path / "one.yaml").write_text(source, encoding="utf-8")
+    monkeypatch.setattr(settings, "sources_dir", tmp_path)
+    assert len(_runnable_sites()) == 1
+
+    (tmp_path / "two.yaml").write_text(source.replace("demo-site", "demo-site-2"), encoding="utf-8")
+    assert len(_runnable_sites()) == 2

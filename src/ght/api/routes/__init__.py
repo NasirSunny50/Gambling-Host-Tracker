@@ -151,7 +151,11 @@ def dashboard(request: Request, session: Session = Depends(get_session)):
             select(func.count()).select_from(Account).where(Account.needs_review)
         )
         or 0,
-        "sites": session.scalar(select(func.count()).select_from(Site)) or 0,
+        # What we are tracking, not what we have ever tracked. The sites table is a
+        # historical record - a site collected once keeps its rows so its runs and evidence
+        # still mean something - so counting it answers a different question than the one
+        # the figure asks. The configs on disk are the targets.
+        "sites": len(_runnable_sites()),
     }
 
     by_channel = session.execute(
