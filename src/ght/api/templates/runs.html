@@ -72,10 +72,14 @@
       <p class="run-sub">
         {{ "Stopped" if failed else "Completed" }} {{ finished.finished_at | stamp }}{% if elapsed %} &middot; took {{ elapsed }}{% endif %}
       </p>
-      {% if failed %}
-      <div class="callout warn">
-        <span class="lead" aria-hidden="true">&#9888;</span>
-        <span>{{ (last_run.error if last_run and last_run.error else finished.message) }}</span>
+      {# A run that saw less than everything says so here, in one line, whether or not
+         anything was broken. A colour with no explanation is what sent the operator
+         hunting for a fault that was the site's own doing. #}
+      {% set why = (last_run.error if last_run and last_run.error else (finished.message if failed else None)) %}
+      {% if why %}
+      <div class="callout {{ 'warn' if failed or (last_run and last_run.status == 'partial') else 'info' }}">
+        <span class="lead" aria-hidden="true">{{ "&#9888;" | safe if failed else "&#9432;" | safe }}</span>
+        <span>{{ why }}</span>
       </div>
       {% endif %}
       {{ ui.phases(phases) }}
@@ -130,7 +134,9 @@
       <td class="num mono">{{ r.candidates_found }}</td>
       <td class="num mono" style="{{ 'color:var(--ok)' if r.accounts_new }}">{{ r.accounts_new }}</td>
       <td class="num mono dim">{{ evidence_counts.get(r.id, 0) }}</td>
-      <td class="{{ 'dim' if r.error else 'mute' }}">{{ (r.error or "—")[:70] }}</td>
+      <td class="{{ 'dim' if r.error else 'mute' }} note">
+        {%- if r.error %}<span title="{{ r.error }}">{{ r.error }}</span>{% else %}&mdash;{% endif -%}
+      </td>
     </tr>
     {% else %}
     <tr><td colspan="7">
@@ -188,6 +194,9 @@
           background:var(--surface-2); border-radius:9px; font-size:13.5px; }
   .fact-icon { font-size:16px; flex:none; }
 
+  /* The note carries the reason a run was not complete, so it gets room to be read
+     rather than being cut at seventy characters. */
+  .note { white-space:normal; min-width:260px; max-width:420px; font-size:12.5px; }
   .quiet-empty { padding:32px 20px; color:var(--text-2); text-align:center; font-size:13px;
                  max-width:520px; margin:0 auto; }
 </style>

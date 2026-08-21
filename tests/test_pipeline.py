@@ -232,3 +232,109 @@ def test_absence_is_only_concluded_from_a_complete_run(session, server):
 
     complete = compute_changeset(session, later, site.id, [], [], complete=True)
     assert len(complete.disappeared_account_ids) == 4
+
+
+# ------------------------------------- whose fault an incomplete run is
+
+
+def _probe_config(server, probes):
+    # A probed source carries no top-level blocks: each probe brings its own.
+    return make_config(server, probes=probes, blocks=[], fetcher="browser", frame="/deposit")
+
+
+def _captures(monkeypatch, per_probe):
+    """Answer each probe with a prepared capture, keyed by probe name."""
+    from datetime import UTC, datetime
+
+    import ght.pipeline.run as run_module
+    from ght.types import RawCapture
+
+    html = (FIXTURES / "demo_site_deposit.html").read_text(encoding="utf-8")
+
+    def fake_fetch(config):
+        name = config.wait_for  # the per-probe copy carries its own wait_for; used as a key
+        kind = per_probe[name]
+        capture = RawCapture(
+            url="https://demo.invalid/deposit",
+            status_code=200,
+            html=html,
+            fetcher="browser",
+            fetched_at=datetime.now(UTC),
+            flow_error="flow step 1 ('.gone') failed: TimeoutError" if kind == "broken" else None,
+            unavailable=".modal-payment--method-undefined" if kind == "declined" else None,
+        )
+        return capture, config.urls[0].url
+
+    monkeypatch.setattr(run_module, "fetch_first_working_url", fake_fetch)
+
+
+def test_a_method_the_site_switched_off_does_not_degrade_the_run(session, server, monkeypatch):
+    """The operator turned it off. Nothing here is broken and nothing here can fix it, so
+    calling the run "partial" sends someone to look for a fault that does not exist."""
+    from ght.sources import Probe
+
+    probes = [
+        Probe(name="works", wait_for="#works", blocks=BLOCKS),
+        Probe(name="switched-off", wait_for="#off", blocks=BLOCKS),
+    ]
+    _captures(monkeypatch, {"#works": "ok", "#off": "declined"})
+    report = run_site(session, _probe_config(server, probes))
+    session.commit()
+
+    assert report.status == "ok"
+    assert session.scalar(select(Alert).where(Alert.type == "method_unavailable")) is not None
+    # It still says so, in the words the runs table shows.
+    run = session.scalar(select(CollectionRun).order_by(CollectionRun.id.desc()))
+    assert "switched off by the site" in run.error
+    assert "switched-off" in run.error
+
+
+def test_a_broken_selector_still_makes_the_run_partial(session, server, monkeypatch):
+    from ght.sources import Probe
+
+    probes = [
+        Probe(name="works", wait_for="#works", blocks=BLOCKS),
+        Probe(name="stale", wait_for="#stale", blocks=BLOCKS),
+    ]
+    _captures(monkeypatch, {"#works": "ok", "#stale": "broken"})
+    report = run_site(session, _probe_config(server, probes))
+    session.commit()
+
+    assert report.status == "partial"
+    run = session.scalar(select(CollectionRun).order_by(CollectionRun.id.desc()))
+    assert "config may be stale" in run.error
+    assert "stale" in run.error
+
+
+def test_both_kinds_are_reported_separately_in_one_run(session, server, monkeypatch):
+    from ght.sources import Probe
+
+    probes = [
+        Probe(name="works", wait_for="#works", blocks=BLOCKS),
+        Probe(name="switched-off", wait_for="#off", blocks=BLOCKS),
+        Probe(name="stale", wait_for="#stale", blocks=BLOCKS),
+    ]
+    _captures(monkeypatch, {"#works": "ok", "#off": "declined", "#stale": "broken"})
+    run_site(session, _probe_config(server, probes))
+    session.commit()
+
+    run = session.scalar(select(CollectionRun).order_by(CollectionRun.id.desc()))
+    assert "config may be stale" in run.error and "switched off by the site" in run.error
+    assert run.status == "partial"  # because of the stale one, not the switched-off one
+
+
+def test_an_incomplete_run_never_concludes_an_account_is_gone(session, server, monkeypatch):
+    """Blame and evidence are different questions. A run can be healthy and still have
+    seen too little to prove anything disappeared."""
+    from ght.sources import Probe
+
+    probes = [
+        Probe(name="works", wait_for="#works", blocks=BLOCKS),
+        Probe(name="switched-off", wait_for="#off", blocks=BLOCKS),
+    ]
+    _captures(monkeypatch, {"#works": "ok", "#off": "declined"})
+    report = run_site(session, _probe_config(server, probes))
+    session.commit()
+
+    assert report.status == "ok"
+    assert report.changes.disappeared_account_ids == []

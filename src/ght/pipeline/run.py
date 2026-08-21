@@ -91,9 +91,12 @@ def _fetcher_kwargs(config: SourceConfig) -> dict:
         "channel": config.browser_channel,
         "frame": config.frame,
         "logged_out_marker": config.logged_out_marker,
+        "unavailable": config.unavailable,
     }
     if config.timeout is not None:
         kwargs["timeout"] = config.timeout
+    if config.flow_timeout is not None:
+        kwargs["flow_timeout"] = config.flow_timeout
     return kwargs
 
 
@@ -344,10 +347,34 @@ def run_site(
     merged: dict[tuple[str, str, str], object] = {}
     # A run only proves an account is gone if every probe that could have shown it ran.
     complete = True
+    # Why it did not, kept apart by whose problem it is. A method the site switched off is
+    # not a defect in this collector and nothing here can fix it; a selector that no longer
+    # matches is ours to repair. Reporting both as "partial" told an operator to go and fix
+    # something that was never broken, so the two are tracked separately and only the
+    # second one degrades the run.
+    declined: list[str] = []
+    broken: list[str] = []
 
     for probe, probe_config, probe_capture in captures:
+        if probe_capture.unavailable:
+            complete = False
+            declined.append(probe.name)
+            session.add(
+                Alert(
+                    type="method_unavailable",
+                    site_id=site.id,
+                    payload={
+                        "probe": probe.name,
+                        "url": probe_capture.url,
+                        "marker": probe_capture.unavailable,
+                    },
+                )
+            )
+            continue
+
         if _capture_status(probe_capture) != "ok":
             complete = False
+            broken.append(probe.name)
             session.add(
                 Alert(
                     type="probe_failed",
@@ -366,6 +393,7 @@ def run_site(
         # simply published no accounts today.
         if probe_capture.flow_error:
             complete = False
+            broken.append(probe.name)
             session.add(
                 Alert(
                     type="flow_broken",
@@ -446,11 +474,30 @@ def run_site(
     report.changes = compute_changeset(
         session, run, site.id, seen_ids, new_ids, complete=complete
     )
-    if not complete:
-        # Say so on the run itself: a green "ok" beside an empty result is how a broken
-        # collector goes unnoticed for a week.
+    # Only our own breakage degrades the run. A green "ok" beside an empty result is how a
+    # broken collector goes unnoticed for a week - but so is a permanent "partial" nobody
+    # can clear, which teaches the same operator to ignore the colour entirely.
+    if broken:
         run.status = "partial"
         report.status = "partial"
+
+    # Say why, on the run, in the words the reader needs. The alerts carry the detail; this
+    # is the one line the runs table and the finished card can show without opening
+    # anything, and without it a partial run is a colour with no explanation.
+    reasons = []
+    if broken:
+        reasons.append(
+            f"{len(broken)} method{'s' if len(broken) > 1 else ''} could not be read "
+            f"({', '.join(sorted(broken))}) - the config may be stale"
+        )
+    if declined:
+        reasons.append(
+            f"{len(declined)} method{'s' if len(declined) > 1 else ''} switched off by the "
+            f"site ({', '.join(sorted(declined))})"
+        )
+    if reasons and not run.error:
+        run.error = "; ".join(reasons)
+        report.error = run.error
 
     run.accounts_new = len(new_ids)
 

@@ -83,6 +83,8 @@ class BrowserFetcher:
         channel: str | None = None,
         frame: str | None = None,
         logged_out_marker: str | None = None,
+        unavailable: list[str] | None = None,
+        flow_timeout: int | None = None,
     ) -> None:
         self.timeout = (timeout if timeout is not None else settings.request_timeout) * 1000
         # Optional selector to wait for, so we capture after the deposit panel renders
@@ -104,6 +106,13 @@ class BrowserFetcher:
         self.frame = frame
         # Substring that only appears while logged out, used to fail fast on a dead session.
         self.logged_out_marker = logged_out_marker
+        # Selectors the site renders when it has switched a method off itself.
+        self.unavailable = list(unavailable or [])
+        # Clicks get their own, shorter budget: the panel may take a minute to appear, but
+        # a button that exists appears in seconds, so a missing one must not cost the lot.
+        self.flow_timeout = (flow_timeout * 1000) if flow_timeout is not None else self.timeout
+        # Set by _walk when the site declared a method unavailable.
+        self._unavailable_hit: str | None = None
 
     def _auth_kwargs(self) -> tuple[dict, str | None]:
         """Reuse a saved browser session when the deposit page sits behind a login.
@@ -146,9 +155,10 @@ class BrowserFetcher:
         flow broke, and pairing it with the screenshot is how someone works out which
         button moved.
         """
+        self._unavailable_hit = None
         for index, step in enumerate(self.flow, start=1):
             try:
-                page.wait_for_selector(step.target, timeout=self.timeout)
+                page.wait_for_selector(step.target, timeout=self.flow_timeout)
                 if step.select:
                     missing = self._missing_option(page, step)
                     if missing is not None:
@@ -157,19 +167,42 @@ class BrowserFetcher:
                     # <select> is a 1x1 accessibility shim behind a styled replacement, and
                     # the usual actionability checks never pass on it.
                     page.select_option(
-                        step.select, label=step.option, force=True, timeout=self.timeout
+                        step.select, label=step.option, force=True, timeout=self.flow_timeout
                     )
                 else:
-                    page.click(step.click, timeout=self.timeout)
+                    page.click(step.click, timeout=self.flow_timeout)
                 if step.wait_for:
-                    page.wait_for_selector(step.wait_for, timeout=self.timeout)
+                    # Race the expected panel against the site's own "unavailable" one.
+                    # Waiting only for the expected one means a method the operator has
+                    # switched off costs a full timeout and is then reported as our
+                    # selector being broken, which is the wrong thing to go and fix.
+                    self._wait_for_either(page, step.wait_for)
+                    if self._unavailable_hit:
+                        return None
                 else:
-                    page.wait_for_load_state("networkidle", timeout=self.timeout)
+                    page.wait_for_load_state("networkidle", timeout=self.flow_timeout)
             except Exception as exc:  # noqa: BLE001 - a broken step is a reportable result
                 if step.optional:
                     continue
                 return f"flow step {index} ({step.target!r}) failed: {type(exc).__name__}: {exc}"
         return None
+
+    def _wait_for_either(self, page, wanted: str) -> None:
+        """Wait for the panel we want or the one that says we cannot have it.
+
+        Playwright takes a comma-joined selector as "any of these", so both are waited on
+        in a single call and whichever renders first ends the wait. Only then do we look
+        at which it was.
+        """
+        combined = ", ".join([wanted, *self.unavailable]) if self.unavailable else wanted
+        page.wait_for_selector(combined, timeout=self.flow_timeout)
+        for marker in self.unavailable:
+            try:
+                if page.query_selector(marker) is not None:
+                    self._unavailable_hit = marker
+                    return
+            except Exception:  # noqa: BLE001, S110 - an unreadable marker is not a hit
+                pass
 
     def _missing_option(self, page, step) -> str | None:
         """Report a dropdown that no longer offers the configured option.
@@ -368,8 +401,15 @@ class BrowserFetcher:
                 # start before deciding which document we are capturing.
                 navigated = self._await_navigation(page, start_url)
                 target = self._capture_target(page, navigated=navigated)
+                # A method the site has switched off never renders the panel the probe
+                # waits for, and waiting for it anyway would turn a two-second answer back
+                # into a full timeout.
+                declined = self._unavailable_hit
                 settle_error = self._settle(
-                    target, skip_wait_for=frame_error is not None or flow_error is not None
+                    target,
+                    skip_wait_for=frame_error is not None
+                    or flow_error is not None
+                    or declined is not None,
                 )
 
                 html, read_error = _read_html(target, page)
@@ -384,6 +424,7 @@ class BrowserFetcher:
                     flow_error=(
                         frame_error or flow_error or settle_error or read_error or auth_warning
                     ),
+                    unavailable=declined,
                 )
                 self._refresh_session(context, page, html, capture.flow_error)
                 context.close()

@@ -78,7 +78,10 @@
       <td class="num mono">{{ r.candidates_found }}</td>
       <td class="num mono {{ '' if r.accounts_new else 'mute' }}"
           style="{{ 'color:var(--ok)' if r.accounts_new }}">{{ r.accounts_new }}</td>
-      <td class="{{ 'dim' if r.error else 'mute' }}">{{ (r.error or "—")[:70] }}</td>
+      <td class="{{ 'dim' if r.error else 'mute' }} note">
+        {%- if r.error %}<span title="{{ r.error }}">{{ r.error[:90] }}{{ "…" if r.error | length > 90 }}</span>
+        {%- else %}&mdash;{% endif -%}
+      </td>
     </tr>
     {% else %}
     <tr><td colspan="6"><div class="quiet-empty">No runs recorded yet.</div></td></tr>
@@ -113,6 +116,7 @@
                 white-space:nowrap; }
   .newest-when { font-size:12px; white-space:nowrap; }
 
+  .note { white-space:normal; min-width:220px; max-width:360px; font-size:12.5px; }
   .quiet-empty { padding:28px 20px; color:var(--text-2); text-align:center; font-size:13px; }
 </style>
 

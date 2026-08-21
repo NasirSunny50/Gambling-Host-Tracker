@@ -44,6 +44,17 @@ frame: /paysystems/deposit
 
 # The account page loads its payment panel in an iframe that routinely takes >30s.
 timeout: 90
+# A click, though, is answered in seconds. Kept separate so a method that has gone away
+# costs seconds rather than the whole page budget - eight probes at 90s each was most of
+# an eight-minute run spent waiting for buttons that were never coming.
+flow_timeout: 25
+
+# 1xBet switches individual methods off and answers the click with an information panel
+# instead of the payee. The modal names the method it opened for, and names it "undefined"
+# when there is nothing to open - that is the site telling us plainly, so a run that hits
+# it stays healthy and simply reports which methods were closed.
+unavailable:
+  - ".modal-payment--method-undefined"
 
 # Present only when signed out; its appearance means the session must be refreshed.
 logged_out_marker: registration-layout-widget
@@ -95,52 +106,6 @@ probes:
         container: ".payment_modal_body"
         value: ".modal-message-address"
         bank_name: "Dutch-Bangla Bank"
-
-  # Bank Transfer shows nothing until a recipient bank is chosen, and each choice is a
-  # different payee, so the dropdown is walked one option at a time. The option text must
-  # match the site exactly; when the site changes its list, the run says so and names the
-  # options it found instead of timing out.
-  - name: bt-dbbl
-    flow:
-      - click: '.payment-cell[data-method="bt_bangla"]'
-        wait_for: ".payment_modal_input--html"
-      - select: 'select[name="bank"]'
-        option: "Dutch-Bangla Bank Limited"
-        wait_for: ".modal-message-address"
-    wait_for: ".payment_modal_input--html"
-    blocks:
-      - channel: bank_transfer
-        container: ".payment_modal_body"
-        value: ".modal-message-address"
-        bank_name: "Dutch-Bangla Bank"
-
-  - name: bt-ific
-    flow:
-      - click: '.payment-cell[data-method="bt_bangla"]'
-        wait_for: ".payment_modal_input--html"
-      - select: 'select[name="bank"]'
-        option: "IFIC"
-        wait_for: ".modal-message-address"
-    wait_for: ".payment_modal_input--html"
-    blocks:
-      - channel: bank_transfer
-        container: ".payment_modal_body"
-        value: ".modal-message-address"
-        bank_name: "IFIC Bank"
-
-  - name: bt-islami
-    flow:
-      - click: '.payment-cell[data-method="bt_bangla"]'
-        wait_for: ".payment_modal_input--html"
-      - select: 'select[name="bank"]'
-        option: "Islami Bank Bangladesh Limited"
-        wait_for: ".modal-message-address"
-    wait_for: ".payment_modal_input--html"
-    blocks:
-      - channel: bank_transfer
-        container: ".payment_modal_body"
-        value: ".modal-message-address"
-        bank_name: "Islami Bank Bangladesh"
 
   # paykassma2. Confirming REDIRECTS out to Nagad's own checkout, which names a merchant
   # but never shows a receiving wallet - so this records a name, not an account. Walking it
@@ -198,6 +163,23 @@ notes: |
       collection must stay on the bt3 methods.
     - the business name sits as a bare text node beside the number rather than in its own
       element, so `holder` cannot select it and holder_name comes back empty.
+
+  2026-08-21 recon (live, logged in). 63 method cells on the page, and the picture had
+  changed again:
+
+    - `bt_bangla` (Bank Transfer) is GONE from the list entirely, taking its bank dropdown
+      with it. The three bt-* probes that walked that dropdown are removed here rather than
+      left to time out; the git history holds them if the method comes back.
+    - `bt_bangladesh_default` (Bkash), `upay_bangla` and `bkash_free` are still listed, but
+      clicking them returns "This method is not available due to technical issues". The
+      modal carries `modal-payment--method-undefined` where a working one carries
+      `modal-payment--method-<name>`, which is what `unavailable:` above matches. This is
+      intermittent - upay collected normally 20 minutes before the recon - so the probes
+      stay and the run reports them as closed rather than broken.
+    - `internet_banking` works. Its modal is Nexus Pay ("নেক্সাস পে ওয়ালেট নাম্বার" plus a
+      13-digit wallet id), which is Dutch-Bangla Bank's own wallet - so `bank_name` below
+      is right, though the number is a wallet id rather than a bank account number.
+    - `fast-nagad` works, and still yields a rotating merchant name rather than an account.
 
   2026-08-20: the site changed under us, which is what the partial run was reporting.
   `pubali_bank_bdt` is gone entirely, and the Bank Transfer dropdown now offers

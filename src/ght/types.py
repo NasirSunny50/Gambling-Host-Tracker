@@ -33,6 +33,10 @@ class RawCapture:
     # purpose: the fetch itself succeeded, so the page we did reach is still worth storing
     # as evidence and still worth extracting from. Only the navigation went wrong.
     flow_error: str | None = None
+    # Set when the site answered the flow with its own "this method is unavailable" panel.
+    # Deliberately not a flow_error: nothing on our side is broken and there is nothing to
+    # repair, so a run carrying only these is still a healthy run - it just saw less.
+    unavailable: str | None = None
 
     @property
     def ok(self) -> bool:

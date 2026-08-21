@@ -189,6 +189,16 @@ class SourceConfig(_Strict):
     timeout: int | None = None
     # Per-method probes. A source uses either these or the single flow/blocks pair above.
     probes: list[Probe] = Field(default_factory=list)
+    # Selectors that mean the site itself has switched a method off - it renders a
+    # "not available" panel instead of the payee. That is the operator's decision, not a
+    # stale selector on our side, and the difference decides whether a run is reported as
+    # healthy or as needing a config fix. Checked the moment a flow step lands, so a
+    # disabled method costs seconds instead of the full page timeout.
+    unavailable: list[str] = Field(default_factory=list)
+    # Per-step timeout in seconds for flow clicks. Separate from ``timeout`` on purpose:
+    # the embedded panel legitimately takes a minute to appear, but a button that is going
+    # to be there is there in seconds, so a missing one should not cost the page budget.
+    flow_timeout: int | None = None
     # Substring present only on the logged-out page. Its appearance means the saved session
     # has expired, so the run stops fast with a clear message instead of timing out on
     # every probe waiting for a deposit panel that will never load.

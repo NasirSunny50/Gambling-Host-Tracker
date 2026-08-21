@@ -160,6 +160,77 @@ def test_optional_step_that_is_absent_is_skipped():
     assert page.clicked == ["#deposit_button"]
 
 
+# --------------------------------------------- a method the site has switched off
+
+
+class FakePageWithMarkers(FakePage):
+    """A page that answers a click with whichever panel the site decided to render."""
+
+    def __init__(self, present=(), failing=None):
+        super().__init__(failing=failing)
+        self.present = set(present)
+
+    def wait_for_selector(self, selector, timeout=None):
+        self.waited.append(selector)
+        # Playwright takes a comma-joined selector as "any of these"; so does this.
+        wanted = [part.strip() for part in selector.split(",")]
+        if any(part in self.present for part in wanted):
+            return
+        raise TimeoutError(f"no element matching {selector}")
+
+    def query_selector(self, selector):
+        return object() if selector in self.present else None
+
+
+def test_a_switched_off_method_is_not_reported_as_a_broken_flow():
+    """The site renders its own "unavailable" panel. Nothing here is broken, so the walk
+    ends cleanly and says which panel it got instead of blaming a selector."""
+    fetcher = BrowserFetcher(
+        flow=[Step(click='.payment-cell[data-method="upay_bangla"]', wait_for=".payee")],
+        unavailable=[".modal-payment--method-undefined"],
+    )
+    page = FakePageWithMarkers(
+        present={'.payment-cell[data-method="upay_bangla"]', ".modal-payment--method-undefined"}
+    )
+    assert fetcher._walk(page) is None
+    assert fetcher._unavailable_hit == ".modal-payment--method-undefined"
+
+
+def test_the_expected_panel_still_wins_when_it_is_the_one_that_rendered():
+    fetcher = BrowserFetcher(
+        flow=[Step(click=".payment-cell", wait_for=".payee")],
+        unavailable=[".modal-payment--method-undefined"],
+    )
+    page = FakePageWithMarkers(present={".payment-cell", ".payee"})
+    assert fetcher._walk(page) is None
+    assert fetcher._unavailable_hit is None
+
+
+def test_a_missing_button_is_still_a_broken_flow():
+    """The site declaring a method off is not the same as the button having vanished -
+    the second one is ours to fix, and must keep saying so."""
+    fetcher = BrowserFetcher(
+        flow=[Step(click=".gone", wait_for=".payee")],
+        unavailable=[".modal-payment--method-undefined"],
+    )
+    page = FakePageWithMarkers(present=set())
+    error = fetcher._walk(page)
+    assert error is not None and ".gone" in error
+    assert fetcher._unavailable_hit is None
+
+
+def test_clicks_use_the_shorter_budget_not_the_page_one():
+    """Eight probes waiting a 90s page budget for a button was most of an eight-minute run."""
+    fetcher = BrowserFetcher(timeout=90, flow_timeout=25, flow=[Step(click=".x")])
+    assert fetcher.timeout == 90_000
+    assert fetcher.flow_timeout == 25_000
+
+
+def test_without_its_own_setting_a_click_may_take_the_page_budget():
+    fetcher = BrowserFetcher(timeout=90, flow=[Step(click=".x")])
+    assert fetcher.flow_timeout == 90_000
+
+
 def test_a_bare_playwright_export_is_still_accepted(tmp_path):
     state = tmp_path / "state.json"
     state.write_text(json.dumps({"cookies": [], "origins": []}), encoding="utf-8")
