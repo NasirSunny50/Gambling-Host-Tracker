@@ -43,17 +43,18 @@ drifts often; a stale selector is a config fix, not a code fix.
 
 ## Recent state
 
-Just finished: unified Payees table (accounts + name-only merchants in one list via SQL
-union), per-page control defaulting to 10, exact timestamps, Alerts page removed, Runs
-table tidied.
+Just finished: the design pass from `design/Portal Pages Design Scope.zip` is implemented
+across every template — sidebar shell with a light/dark toggle, channel marks, status and
+outcome pills, confidence as percentage + bar + provenance word, the distinction between
+"not applicable" and "unknown", and the run states (idle, running, waiting for sign-in,
+finished). New page: **Components & notes** at `/components`, which shows the recurring
+elements and the reasoning behind them. `tests/test_portal_templates.py` renders every page
+offline, including the run states that otherwise need a live collection to reach.
 
-`docs/design-brief.md` is a brief for redesigning the portal, deliberately free of visual
-direction — a separate design pass may replace the templates.
+`docs/design-brief.md` is the brief that pass was made against.
 
 ## Known open items
 
-- `account_detail.html` still labels its evidence section without explaining what evidence
-  *is*; elsewhere it now reads "Pages saved".
 - Collection could be ~2× faster by reusing one browser across probes instead of launching
   per probe. Not done — was judged not worth the risk yet.
 - Portal has **no authentication** and binds to loopback. It must sit behind an

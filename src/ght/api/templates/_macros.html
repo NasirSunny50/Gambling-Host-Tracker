@@ -1,71 +1,142 @@
-{# Reusable building blocks. Imported as `ui` so a page reads ui.tag(...), ui.table(...). #}
+{# Reusable building blocks. Imported as `ui` so a page reads ui.channel(...), ui.table(...). #}
 
 {% set CHANNEL_LABELS = {
   "bkash":"bKash", "nagad":"Nagad", "rocket":"Rocket", "upay":"Upay",
   "tap":"Tap", "mcash":"mCash", "bank_transfer":"Bank transfer"
 } %}
 
+{# A short mark per channel. The two-letter form is legible at 10px where a wordmark is
+   not, and it carries the channel's own colour so a scan down the column groups by eye. #}
+{% set CHANNEL_MARKS = {
+  "bkash":"bK", "nagad":"Ng", "rocket":"Rk", "upay":"Up",
+  "tap":"Tp", "mcash":"mC", "bank_transfer":"BT"
+} %}
+
 {% macro channel(value) -%}
-<span class="badge ch-{{ value }}">{{ CHANNEL_LABELS.get(value, value) }}</span>
+<span class="ch">
+  <span class="ch-mark ch-{{ value }}" aria-hidden="true">{{ CHANNEL_MARKS.get(value, "··") | safe }}</span>
+  <span class="ch-label">{{ CHANNEL_LABELS.get(value, value) }}</span>
+</span>
 {%- endmacro %}
 
 {% macro tag(text, kind="neutral") -%}
 <span class="tag tag-{{ kind }}">{{ text }}</span>
 {%- endmacro %}
 
+{# Absence has two meanings and they must not look alike. `na` is "there is nothing to
+   collect here"; `unknown` is "there was something and we failed to collect it". A blank
+   cell would let a reader mistake one for the other. #}
+{% macro na() -%}
+<span class="na" title="Not applicable — this payee is a name, not a numbered account">&mdash;</span>
+{%- endmacro %}
+
+{% macro unknown() -%}
+<span class="unknown">unknown</span>
+{%- endmacro %}
+
+{# Confidence: a percentage, a three-segment bar, and the word for where the number came
+   from. Never colour alone, and it states its provenance rather than asking the reader to
+   remember what 72% implies. #}
 {% macro confidence(value) -%}
-{% set k = "ok" if value >= 0.9 else ("warn" if value >= 0.6 else "bad") -%}
-<span class="tag tag-{{ k }}" title="Extraction confidence">{{ "%.0f%%" | format(value * 100) }}</span>
+{% if value is none %}{{ na() }}
+{%- else %}
+{% set tone = "ok" if value >= 0.9 else ("warn" if value >= 0.6 else "bad") -%}
+{% set tier = "exact selector" if value >= 0.9 else ("inferred" if value >= 0.6 else "text sweep") -%}
+{% set fill = 3 if value >= 0.9 else (2 if value >= 0.6 else 1) -%}
+<span class="conf conf-{{ tone }}">
+  <span class="conf-top">
+    <span class="conf-pct">{{ "%.0f%%" | format(value * 100) }}</span>
+    <span class="conf-bars" aria-hidden="true">
+      {% for i in range(3) %}<span class="{{ 'on' if i < fill }}"></span>{% endfor %}
+    </span>
+  </span>
+  <span class="conf-tier">{{ tier }}</span>
+</span>
+{%- endif %}
+{%- endmacro %}
+
+{# What state a payee is in. `name` is not a fourth status of an account — it marks a row
+   that never had a number to go active or gone in the first place. #}
+{% macro status_pill(kind) -%}
+{% set map = {
+  "active": ("active", "&#9679;", "ok"),
+  "gone": ("gone", "&#9675;", "gone"),
+  "review": ("needs review", "&#9650;", "warn"),
+  "name": ("name only", "Aa", "name"),
+} -%}
+{% set m = map.get(kind, (kind, "", "gone")) -%}
+<span class="pill pill-{{ m[2] }}" role="status">
+  <span class="pill-glyph {{ 'is-word' if m[1] == 'Aa' }}" aria-hidden="true">{{ m[1] | safe }}</span>{{ m[0] }}
+</span>
+{%- endmacro %}
+
+{% macro payee_status(r) -%}
+{% if r.kind == "merchant" %}{{ status_pill("name") }}
+{%- elif r.needs_review %}{{ status_pill("review") }}
+{%- elif r.is_active %}{{ status_pill("active") }}
+{%- else %}{{ status_pill("gone") }}{% endif %}
 {%- endmacro %}
 
 {% macro account_state(a) -%}
-{% if a.needs_review %}{{ tag("Needs review", "warn") }}
-{%- elif a.is_active %}{{ tag("Active", "ok") }}
-{%- else %}{{ tag("Gone", "neutral") }}{% endif %}
+{% if a.needs_review %}{{ status_pill("review") }}
+{%- elif a.is_active %}{{ status_pill("active") }}
+{%- else %}{{ status_pill("gone") }}{% endif %}
 {%- endmacro %}
 
-{% macro alert_tag(kind) -%}
-{% set bad = ["site_down", "site_blocked", "probe_failed", "login_failed"] -%}
-{% set warn = ["extractor_broken", "flow_broken", "account_disappeared", "auth_expired", "login_challenge"] -%}
-{% set k = "bad" if kind in bad else ("warn" if kind in warn else "ok") -%}
-{{ tag(kind | replace("_", " "), k) }}
+{# How a run ended. Blocked is kept apart from failed on purpose: it needs a different fix. #}
+{% macro outcome_pill(status) -%}
+{% set map = {
+  "ok": ("ok", "&#9679;", "ok"),
+  "partial": ("partial", "&#9680;", "warn"),
+  "failed": ("failed", "&#10005;", "bad"),
+  "blocked": ("blocked", "&#9954;", "name"),
+} -%}
+{% set m = map.get(status, (status, "&#9679;", "gone")) -%}
+<span class="pill pill-{{ m[2] }}">
+  <span class="pill-glyph" aria-hidden="true">{{ m[1] | safe }}</span>{{ m[0] }}
+</span>
 {%- endmacro %}
 
 {# An account number: monospace, links to its detail page, with a copy button. #}
 {% macro number(a) -%}
-<span class="num-cell">
-  <a class="mono" href="/accounts/{{ a.id }}">{{ a.account_number }}</a>
-  <button class="copy" title="Copy" onclick="copyText(this, '{{ a.account_number }}')">⧉</button>
-</span>
+{{ number_text(a.id, a.account_number) }}
 {%- endmacro %}
 
 {# Same as number(), for rows that are plain tuples rather than ORM objects. #}
 {% macro number_text(account_id, value) -%}
 <span class="num-cell">
-  <a class="mono" href="/accounts/{{ account_id }}">{{ value }}</a>
-  <button class="copy" title="Copy" onclick="copyText(this, '{{ value }}')">&#10696;</button>
+  <a href="/accounts/{{ account_id }}">{{ value }}</a>
+  <button class="copy" type="button" title="Copy number" onclick="copyText(this, '{{ value }}')">&#10696;</button>
 </span>
 {%- endmacro %}
 
-{% macro stat(n, label, href=None, tone="") -%}
-{% if href %}<a class="stat {{ tone }}" href="{{ href }}">{% else %}<div class="stat {{ tone }}">{% endif %}
-  <div class="stat-n">{{ n }}</div>
-  <div class="stat-k">{{ label }}</div>
+{# A headline figure on the overview. Every one is a link: the number is a question, and
+   the answer is the filtered list behind it. #}
+{% macro figure(value, label, note, href=None, tone="") -%}
+{% if href %}<a class="figure {{ tone }}" href="{{ href }}">{% else %}<div class="figure {{ tone }}">{% endif %}
+  <span class="figure-k">{{ label }}</span>
+  <span class="figure-n">{{ value }}</span>
+  <span class="figure-note">{{ note }}</span>
 {% if href %}</a>{% else %}</div>{% endif %}
 {%- endmacro %}
 
 {% macro section(title, count=None) -%}
-<div class="section"><h2>{{ title }}</h2>{% if count is not none %}<span class="count">{{ count }}</span>{% endif %}</div>
+<div class="section-head"><h2>{{ title }}</h2>{% if count is not none %}<span class="count">{{ count }}</span>{% endif %}</div>
 {%- endmacro %}
 
-{% macro empty(title, body="") -%}
-<div class="empty"><div class="empty-title">{{ title }}</div>{% if body %}<div class="empty-body">{{ body }}</div>{% endif %}</div>
+{% macro empty(title, body="", glyph="&#9636;", action_href=None, action_label=None) -%}
+<div class="empty">
+  <div class="glyph" aria-hidden="true">{{ glyph | safe }}</div>
+  <h2>{{ title }}</h2>
+  {% if body %}<p>{{ body }}</p>{% endif %}
+  {% if action_href %}<a class="btn btn-primary" href="{{ action_href }}">{{ action_label }}</a>{% endif %}
+</div>
 {%- endmacro %}
 
 {# Table shell. Pass headers; a header starting with "#" is right-aligned numeric. The
    caller renders the <tr> rows, so the empty case lives with the data that knows its span. #}
 {% macro table(headers) -%}
-<div class="table-wrap"><table>
+<div class="scroll-x"><table>
   <thead><tr>
   {%- for h in headers %}<th class="{{ 'num' if h.startswith('#') }}">{{ h.lstrip('#') }}</th>{% endfor -%}
   </tr></thead>
@@ -73,26 +144,65 @@
 </table></div>
 {%- endmacro %}
 
-{# Pagination control. `params` are the filters to carry across pages, so paging never
-   silently drops the filter the reader is looking at. #}
-{% macro pager(p, base, params) -%}
-{% if p.total -%}
+{# The footer of a paged table: what you are looking at, how many rows to show, and the
+   step controls. `params` are the filters to carry across pages, so paging never silently
+   drops the filter the reader is looking at. #}
+{% macro pager(p, base, params, page_sizes=None, per=None, noun="rows") -%}
 {% set qs = [] %}
 {% for key, value in params.items() %}{% if value %}{% set _ = qs.append(key ~ "=" ~ value) %}{% endif %}{% endfor %}
 {% set base_qs = qs | join("&") %}
-<nav class="pager" aria-label="Pagination">
-  <span class="range">Showing {{ p.first_row }}&ndash;{{ p.last_row }} of {{ p.total }}</span>
-  {% if p.pages > 1 %}
-  <span class="spread">
-    {% if p.has_prev %}
-      <a class="step" href="{{ base }}?{{ base_qs }}{{ '&' if base_qs }}page={{ p.number - 1 }}">Previous</a>
-    {% else %}<span class="step step--off">Previous</span>{% endif %}
-    <span class="where">Page {{ p.number }} of {{ p.pages }}</span>
-    {% if p.has_next %}
-      <a class="step" href="{{ base }}?{{ base_qs }}{{ '&' if base_qs }}page={{ p.number + 1 }}">Next</a>
-    {% else %}<span class="step step--off">Next</span>{% endif %}
-  </span>
-  {% endif %}
-</nav>
-{%- endif %}
+<div class="pager">
+  <span class="range">{% if p.total %}Showing {{ p.first_row }}&ndash;{{ p.last_row }} of {{ p.total }} {{ noun }}{% endif %}</span>
+  <div class="pager-right">
+    {% if page_sizes %}
+    <div class="per">
+      <span>Per page</span>
+      {% for size in page_sizes %}
+        {% set size_qs = [] %}
+        {% for key, value in params.items() %}{% if value and key != "per" %}{% set _ = size_qs.append(key ~ "=" ~ value) %}{% endif %}{% endfor %}
+        <a class="per-n {{ 'on' if size == per }}"
+           href="{{ base }}?{{ size_qs | join('&') }}{{ '&' if size_qs }}per={{ size }}">{{ size }}</a>
+      {% endfor %}
+    </div>
+    {% endif %}
+    {% if p.pages > 1 %}
+    <nav class="steps" aria-label="Pagination">
+      {% if p.has_prev %}
+        <a class="step" href="{{ base }}?{{ base_qs }}{{ '&' if base_qs }}page={{ p.number - 1 }}">&lsaquo; Prev</a>
+      {% else %}<span class="step step--off">&lsaquo; Prev</span>{% endif %}
+      <span class="where">{{ p.number }} / {{ p.pages }}</span>
+      {% if p.has_next %}
+        <a class="step" href="{{ base }}?{{ base_qs }}{{ '&' if base_qs }}page={{ p.number + 1 }}">Next &rsaquo;</a>
+      {% else %}<span class="step step--off">Next &rsaquo;</span>{% endif %}
+    </nav>
+    {% endif %}
+  </div>
+</div>
+{%- endmacro %}
+
+{# The three phases of a run, as a checklist. `states` is one of done/active/pending/
+   waiting/stopped per phase, so the same component serves progress, the pause for a
+   sign-in, and the finished summary. #}
+{% macro phases(items, step=None, total=None) -%}
+{% set label = {"done":"done", "active":"in progress", "pending":"pending",
+                "waiting":"waiting for you", "stopped":"stopped"} -%}
+{% set subs = {"signin":"authenticate the saved session",
+               "collect":"every payment method on this site",
+               "store":"de-duplicate and store proof"} -%}
+<div class="phases">
+  {% for p in items %}
+  <div class="phase phase--{{ p.state }}">
+    {% if p.state == "done" %}<span class="phase-mark is-done" aria-hidden="true">&#10003;</span>
+    {% elif p.state == "active" %}<span class="phase-mark is-active" aria-hidden="true"></span>
+    {% elif p.state == "waiting" %}<span class="phase-mark is-waiting" aria-hidden="true">&#8214;</span>
+    {% elif p.state == "stopped" %}<span class="phase-mark is-stopped" aria-hidden="true">&#10005;</span>
+    {% else %}<span class="phase-mark" aria-hidden="true">{{ loop.index }}</span>{% endif %}
+    <span class="phase-body">
+      <span class="phase-title">{{ p.label }}</span>
+      <span class="phase-sub">{{ subs.get(p.name, "") }}</span>
+    </span>
+    <span class="phase-state">{{ label.get(p.state, p.state) }}</span>
+  </div>
+  {% endfor %}
+</div>
 {%- endmacro %}

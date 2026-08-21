@@ -2,77 +2,142 @@
 {% import "_macros.html" as ui %}
 {% set page = "accounts" %}
 {% block title %}{{ account.account_number }} — Host Tracker{% endblock %}
+{% block heading %}Payee detail{% endblock %}
+{% block subtitle %}Everything known about this account, and the pages that prove it{% endblock %}
 {% block body %}
 
-<p class="sub" style="margin-bottom:6px"><a href="/accounts">← Accounts</a></p>
-<div class="head">
-  <h1 class="mono" style="font-size:24px">{{ account.account_number }}</h1>
-  <div class="actions">
-    {{ ui.channel(account.channel) }}
-    {{ ui.account_state(account) }}
-    <button class="copy" title="Copy number" onclick="copyText(this, '{{ account.account_number }}')" style="font-size:14px">⧉</button>
+<p class="back"><a href="/payees">&lsaquo; Back to payees</a></p>
+
+<div class="detail">
+  <div class="col">
+    <section class="panel">
+      <div class="ident">
+        <div class="ident-ch">{{ ui.channel(account.channel) }}</div>
+        <div class="ident-num mono">{{ account.account_number }}</div>
+        <div class="ident-state">
+          {{ ui.account_state(account) }}
+          {{ ui.confidence(account.confidence) }}
+        </div>
+      </div>
+      <dl class="kv">
+        <div class="row"><dt>Holder name</dt><dd>{{ account.holder_name or ui.unknown() }}</dd></div>
+        <div class="row"><dt>Bank</dt><dd>{{ account.bank_name or ui.unknown() }}</dd></div>
+        <div class="row"><dt>Branch</dt><dd>{{ account.branch or ui.unknown() }}</dd></div>
+        <div class="row"><dt>Operator</dt><dd>{{ account.operator or ui.unknown() }}</dd></div>
+        <div class="row"><dt>Account type</dt><dd>{{ account.account_type or ui.unknown() }}</dd></div>
+        <div class="row"><dt>First seen</dt><dd class="mono">{{ account.first_seen_at | stamp }}</dd></div>
+        <div class="row"><dt>Last seen</dt><dd class="mono">{{ account.last_seen_at | stamp }}</dd></div>
+        <div class="row"><dt>Times seen</dt><dd class="mono">{{ account.observation_count }}</dd></div>
+      </dl>
+    </section>
+
+    <button class="btn copy-wide" type="button"
+            onclick="copyText(this, '{{ account.account_number }}')">&#10696; Copy account number</button>
+
+    <section class="panel">
+      <h2>Seen on {{ sites | length }} site{{ "" if sites | length == 1 else "s" }}</h2>
+      {% for site, link in sites %}
+      <div class="site-row">
+        <div class="site-id">
+          <span class="strong">{{ site.slug }}</span>
+          <span class="site-sub">{{ site.name }}</span>
+        </div>
+        <div class="site-when mono mute">
+          {{ link.first_seen_at | stamp }} &rarr; {{ link.last_seen_at | stamp }}
+        </div>
+        <span class="tag">{{ link.observation_count }}&times;</span>
+      </div>
+      {% else %}
+      <div class="quiet-empty">Not linked to any site yet.</div>
+      {% endfor %}
+    </section>
+  </div>
+
+  <div class="col">
+    <section class="panel">
+      <h2>Pages saved &mdash; {{ evidence_total }}</h2>
+      <p class="panel-note">
+        A copy of exactly what the site returned on each run that showed this number, stored
+        byte-for-byte and hashed with SHA-256. It is what lets someone downstream confirm the
+        number was really advertised, on that page, on that date &mdash; long after the site
+        has rotated it away. <code>ght verify-evidence</code> re-hashes these against the
+        digests below.
+      </p>
+      {% for e in evidence %}
+      <div class="ev">
+        <div class="ev-top">
+          <span class="mono strong">{{ e.captured_at | stamp }}</span>
+          <span class="mono mute">run #{{ e.run_id }} &middot; {{ e.kind }} &middot; {{ "{:,}".format(e.bytes) }} bytes</span>
+        </div>
+        <div class="ev-path mono">{{ e.path }}</div>
+        <div class="ev-hash mono mute">sha256:{{ e.sha256[:16] }}&hellip;{{ e.sha256[-8:] }}</div>
+      </div>
+      {% else %}
+      <div class="quiet-empty">No pages were saved for the runs that saw this account.</div>
+      {% endfor %}
+      {% if evidence_total > evidence_shown %}
+      <div class="ev-more">Showing the {{ evidence_shown }} most recent of {{ evidence_total }}.
+        All of them are on disk and covered by <code>ght verify-evidence</code>.</div>
+      {% endif %}
+    </section>
+
+    <section class="panel">
+      <h2>Sightings &mdash; {{ observations | length }}</h2>
+      {% call ui.table(["When", "#Run", "Raw text", "Origin", "Confidence"]) %}
+        {% for o in observations %}
+        <tr>
+          <td class="dim mono nowrap">{{ o.observed_at | stamp }}</td>
+          <td class="num mono">#{{ o.run_id }}</td>
+          <td class="mono"><span class="clip" title="{{ o.raw_text }}">{{ o.raw_text[:70] }}</span></td>
+          <td class="dim mono"><span class="clip" title="{{ o.origin }}">{{ o.origin[:44] }}</span></td>
+          <td>{{ ui.confidence(o.confidence) }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="5"><div class="quiet-empty">No sightings recorded.</div></td></tr>
+        {% endfor %}
+      {% endcall %}
+    </section>
   </div>
 </div>
-<p class="sub">Seen {{ account.observation_count }}× · first {{ account.first_seen_at | age }} · last {{ account.last_seen_at | age }}</p>
 
-{{ ui.section("Details") }}
-<div class="panel">
-  <dl class="kv">
-    <dt>Holder</dt><dd>{{ account.holder_name or "—" }}</dd>
-    <dt>Bank</dt><dd>{{ account.bank_name or "—" }}</dd>
-    <dt>Branch</dt><dd>{{ account.branch or "—" }}</dd>
-    <dt>Operator</dt><dd>{{ account.operator or "—" }}</dd>
-    <dt>Account type</dt><dd>{{ account.account_type or "—" }}</dd>
-    <dt>Confidence</dt><dd>{{ ui.confidence(account.confidence) }}</dd>
-    <dt>First seen</dt><dd>{{ account.first_seen_at.strftime("%Y-%m-%d %H:%M") if account.first_seen_at else "—" }} <span class="mute">({{ account.first_seen_at | age }})</span></dd>
-    <dt>Last seen</dt><dd>{{ account.last_seen_at.strftime("%Y-%m-%d %H:%M") if account.last_seen_at else "—" }} <span class="mute">({{ account.last_seen_at | age }})</span></dd>
-  </dl>
-</div>
+<style>
+  .back { margin:0 0 14px; font-size:13px; }
+  .back a { color:var(--text-2); }
+  .detail { display:grid; grid-template-columns:1fr 1.5fr; gap:16px; align-items:start; }
+  .detail .col { display:flex; flex-direction:column; gap:16px; min-width:0; }
+  @media (max-width:1000px) { .detail { grid-template-columns:1fr; } }
 
-{{ ui.section("Seen on", count=sites | length) }}
-{% call ui.table(["Site", "Name", "First seen", "Last seen", "#Times"]) %}
-  {% for site, link in sites %}
-  <tr>
-    <td>{{ site.slug }}</td>
-    <td class="dim">{{ site.name }}</td>
-    <td class="dim">{{ link.first_seen_at | age }}</td>
-    <td class="dim">{{ link.last_seen_at | age }}</td>
-    <td class="num">{{ link.observation_count }}</td>
-  </tr>
-  {% else %}
-  <tr><td colspan="5">{{ ui.empty("No site links") }}</td></tr>
-  {% endfor %}
-{% endcall %}
+  .ident { padding:18px 16px; border-bottom:1px solid var(--border); }
+  .ident-ch { margin-bottom:12px; }
+  .ident-num { font-size:22px; font-weight:750; letter-spacing:.5px; margin-bottom:10px;
+               word-break:break-all; }
+  .ident-state { display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+  .copy-wide { justify-content:center; height:40px; }
 
-{{ ui.section("Observations", count=observations | length) }}
-{% call ui.table(["When", "#Run", "Raw text", "Origin", "Confidence"]) %}
-  {% for o in observations %}
-  <tr>
-    <td class="dim">{{ o.observed_at | age }}</td>
-    <td class="num">#{{ o.run_id }}</td>
-    <td class="mono">{{ o.raw_text[:70] }}</td>
-    <td class="dim mono">{{ o.origin[:44] }}</td>
-    <td>{{ ui.confidence(o.confidence) }}</td>
-  </tr>
-  {% else %}
-  <tr><td colspan="5">{{ ui.empty("No observations") }}</td></tr>
-  {% endfor %}
-{% endcall %}
+  .panel-note { margin:0; padding:12px 16px; font-size:12.5px; color:var(--text-2);
+                border-bottom:1px solid var(--border); background:var(--surface-2); }
+  .panel-note code { font-family:var(--mono); font-size:12px; }
 
-{{ ui.section("Evidence") }}
-<p class="sub mute" style="margin-top:-6px">Stored page bytes and screenshots from those runs, addressed and verified by SHA-256.</p>
-{% call ui.table(["#Run", "Kind", "SHA-256", "#Bytes", "Path"]) %}
-  {% for e in evidence %}
-  <tr>
-    <td class="num">#{{ e.run_id }}</td>
-    <td>{{ e.kind }}</td>
-    <td class="mono mute">{{ e.sha256[:16] }}…</td>
-    <td class="num dim">{{ "{:,}".format(e.bytes) }}</td>
-    <td class="mono mute">{{ e.path }}</td>
-  </tr>
-  {% else %}
-  <tr><td colspan="5">{{ ui.empty("No evidence stored") }}</td></tr>
-  {% endfor %}
-{% endcall %}
+  .ev { padding:14px 16px; border-bottom:1px solid var(--border); display:flex;
+        flex-direction:column; gap:6px; }
+  .ev:last-child { border-bottom:none; }
+  .ev-top { display:flex; justify-content:space-between; align-items:center; gap:12px;
+            flex-wrap:wrap; font-size:12.5px; }
+  .ev-top .strong { font-weight:600; }
+  .ev-path { font-size:12px; color:var(--text-2); word-break:break-all; }
+  .ev-hash { font-size:11.5px; }
+  .ev-more { padding:12px 16px; font-size:12.5px; color:var(--text-2); background:var(--surface-2); }
+  .ev-more code { font-family:var(--mono); font-size:12px; }
+
+  .site-row { display:flex; align-items:center; gap:12px; padding:12px 16px;
+              border-bottom:1px solid var(--border); }
+  .site-row:last-child { border-bottom:none; }
+  .site-id { flex:1; min-width:0; display:flex; flex-direction:column; }
+  .site-id .strong { font-weight:600; }
+  .site-sub { font-size:12px; color:var(--text-3); }
+  .site-when { font-size:11.5px; white-space:nowrap; }
+
+  .quiet-empty { padding:28px 20px; color:var(--text-2); text-align:center; font-size:13px; }
+</style>
 
 {% endblock %}

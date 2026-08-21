@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% import "_macros.html" as ui %}
+{% set page = "components" %}
+{% block title %}Components &amp; notes — Host Tracker{% endblock %}
+{% block heading %}Components &amp; notes{% endblock %}
+{% block subtitle %}The recurring elements, and the reasoning behind them{% endblock %}
+{% block body %}
+
+<div class="notes">
+  <section class="panel pad">
+    <h3>Status labels</h3>
+    <div class="row"><span class="row-k">Account states</span>
+      <span class="row-v">{{ ui.status_pill("active") }} {{ ui.status_pill("gone") }} {{ ui.status_pill("review") }}</span></div>
+    <div class="row"><span class="row-k">Name-only payee</span>
+      <span class="row-v">{{ ui.status_pill("name") }}</span></div>
+    <div class="row"><span class="row-k">Run outcomes</span>
+      <span class="row-v">{{ ui.outcome_pill("ok") }} {{ ui.outcome_pill("partial") }}
+        {{ ui.outcome_pill("failed") }} {{ ui.outcome_pill("blocked") }}</span></div>
+  </section>
+
+  <section class="panel pad">
+    <h3>Channel indicators</h3>
+    <div class="spread">
+      {% for key in ui.CHANNEL_LABELS %}<span>{{ ui.channel(key) }}</span>{% endfor %}
+    </div>
+  </section>
+
+  <section class="panel pad">
+    <h3>Confidence</h3>
+    <div class="spread wide">
+      {{ ui.confidence(0.97) }}{{ ui.confidence(0.72) }}{{ ui.confidence(0.55) }}{{ ui.confidence(none) }}
+    </div>
+  </section>
+
+  <section class="panel pad">
+    <h3>Absence &mdash; two meanings</h3>
+    <div class="row"><span class="row-k">Not applicable</span>
+      <span class="row-v">{{ ui.na() }}
+        <span class="gloss">a name-only payee has no number, bank or confidence &mdash; there is
+        nothing there to collect</span></span></div>
+    <div class="row"><span class="row-k">Unknown</span>
+      <span class="row-v">{{ ui.unknown() }}
+        <span class="gloss">a numbered account whose holder or bank was not found &mdash; we
+        failed to collect it</span></span></div>
+  </section>
+
+  <section class="panel pad">
+    <h3>Design notes</h3>
+    <div class="prose">
+      <p><strong>Name-only vs numbered payee.</strong> Both live in one table because the
+      reader&rsquo;s question &mdash; who receives the deposits &mdash; is the same. Name-only rows
+      carry a tinted background and a dedicated &ldquo;name only&rdquo; status, and their empty cells
+      render as an em-dash marked <em>not applicable</em>, never as blank. That is deliberately
+      distinct from an account with an unknown holder, which reads as an italic
+      <em>unknown</em>. A blank cell would let the reader mistake &ldquo;there is none to
+      collect&rdquo; for &ldquo;we failed to collect it&rdquo;.</p>
+
+      <p><strong>Certainty.</strong> Confidence is a percentage plus a three-segment bar plus a
+      word &mdash; exact selector, inferred, or text sweep &mdash; so it is never colour alone and it
+      states its provenance. Only the top tier is safe to feed a blocklist automatically,
+      which the wording makes legible without a legend.</p>
+
+      <p><strong>Waiting for sign-in.</strong> The hardest moment gets its own treatment: a calm
+      blue rather than red, a &ldquo;not an error&rdquo; eyebrow, a countdown, and three unmissable
+      facts &mdash; it is waiting for you, a browser window opened elsewhere, and it resumes on
+      its own. Distinct from progress at a glance, and distinct from failure by colour and
+      copy.</p>
+
+      <p><strong>Exact timestamps.</strong> Relative ages (&ldquo;3h ago&rdquo;) read nicely and hide the
+      thing a case file has to state. Every time shown in a list or on a detail page is the
+      exact local timestamp.</p>
+
+      <p><strong>No alerts screen.</strong> Health lives in the data itself: the Overview&rsquo;s
+      &ldquo;needs review&rdquo; figure, the sidebar badge, and the note column on runs carry what a
+      separate feed would, so nobody has to visit a log to know collection is healthy.</p>
+    </div>
+  </section>
+</div>
+
+<style>
+  .notes { max-width:900px; display:flex; flex-direction:column; gap:16px; }
+  .panel.pad { padding:20px; }
+  .notes h3 { margin:0 0 14px; font-size:13px; text-transform:uppercase; letter-spacing:.5px;
+              color:var(--text-2); font-weight:600; }
+  .notes .row { display:flex; align-items:center; gap:16px; padding:10px 0;
+                border-bottom:1px solid var(--border); }
+  .notes .row:last-child { border-bottom:none; }
+  .row-k { width:150px; flex:none; font-size:12.5px; color:var(--text-2); }
+  .row-v { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+  .gloss { font-size:12.5px; color:var(--text-2); }
+  .spread { display:flex; gap:18px; flex-wrap:wrap; }
+  .spread.wide { gap:28px; }
+  .prose { display:flex; flex-direction:column; gap:14px; font-size:13.5px; line-height:1.55; }
+  .prose p { margin:0; }
+</style>
+
+{% endblock %}

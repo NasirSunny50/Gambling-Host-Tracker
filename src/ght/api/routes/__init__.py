@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import csv
 import io
+import re
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from math import ceil
@@ -99,6 +100,31 @@ templates.env.filters["channel"] = lambda value: CHANNEL_LABELS.get(value, value
 templates.env.globals["job"] = manager
 
 
+# How the newest run's outcome reads in the header. There is no alerts page: whether
+# collection is healthy has to be legible from the chrome of whatever page you are on.
+_HEALTH = {
+    "ok": ("collection healthy", "ok"),
+    "partial": ("collection degraded", "warn"),
+    "failed": ("last run failed", "bad"),
+    "blocked": ("site is blocking us", "bad"),
+}
+
+
+def _nav(session: Session) -> dict:
+    """The two things the shell shows on every page: what needs a human, and whether
+    collection is working. Both are counts, so this costs a page load almost nothing."""
+    review = session.scalar(select(func.count()).select_from(Account).where(Account.needs_review))
+    latest = session.scalar(select(CollectionRun).order_by(CollectionRun.started_at.desc()).limit(1))
+    health, tone = _HEALTH.get(latest.status, (latest.status, "warn")) if latest else ("no runs yet", "idle")
+    return {
+        "review": review or 0,
+        "health": health,
+        "health_tone": tone,
+        # Local time, to match every timestamp shown in the tables below it.
+        "now": datetime.now(UTC).astimezone().strftime("%Y-%m-%d %H:%M"),
+    }
+
+
 @router.get("/", response_class=HTMLResponse)
 def dashboard(request: Request, session: Session = Depends(get_session)):
     totals = {
@@ -129,6 +155,7 @@ def dashboard(request: Request, session: Session = Depends(get_session)):
         request,
         "dashboard.html",
         {
+            "nav": _nav(session),
             "totals": totals,
             "by_channel": by_channel,
             "runs": runs,
@@ -313,6 +340,7 @@ def payees(
         request,
         "payees.html",
         {
+            "nav": _nav(session),
             "rows": rows,
             "pagination": page_info,
             "channels": channels,
@@ -337,6 +365,10 @@ def merchants_redirect(request: Request):
     return RedirectResponse("/payees", status_code=307)
 
 
+# How many saved pages the detail view lists before it stops and gives the total instead.
+EVIDENCE_SHOWN = 20
+
+
 @router.get("/accounts/{account_id}", response_class=HTMLResponse)
 def account_detail(account_id: int, request: Request, session: Session = Depends(get_session)):
     account = session.get(Account, account_id)
@@ -356,24 +388,38 @@ def account_detail(account_id: int, request: Request, session: Session = Depends
         .where(AccountSite.account_id == account_id)
     ).all()
 
+    # Every page saved by every run that saw this account. A long-lived number can have
+    # hundreds, so the page shows the most recent and states the true total rather than
+    # rendering the lot.
     run_ids = {o.run_id for o in observations}
-    evidence = (
-        session.scalars(
-            select(Evidence).where(Evidence.run_id.in_(run_ids)).order_by(Evidence.id.desc())
+    evidence_total = 0
+    evidence = []
+    if run_ids:
+        evidence_total = (
+            session.scalar(
+                select(func.count()).select_from(Evidence).where(Evidence.run_id.in_(run_ids))
+            )
+            or 0
+        )
+        evidence = session.scalars(
+            select(Evidence)
+            .where(Evidence.run_id.in_(run_ids))
+            .order_by(Evidence.captured_at.desc())
+            .limit(EVIDENCE_SHOWN)
         ).all()
-        if run_ids
-        else []
-    )
 
     _log(session, request, "api_read", {"account_id": account_id}, 1)
     return templates.TemplateResponse(
         request,
         "account_detail.html",
         {
+            "nav": _nav(session),
             "account": account,
             "observations": observations,
             "sites": sites,
             "evidence": evidence,
+            "evidence_total": evidence_total,
+            "evidence_shown": EVIDENCE_SHOWN,
         },
     )
 
@@ -396,6 +442,35 @@ def _runnable_sites() -> list[dict]:
     return out
 
 
+def _is_waiting(info) -> bool:
+    """Whether the run is paused for the operator rather than working.
+
+    This is the one state the page must never let read as "busy" or as "broken": the run
+    is fine, it is standing still until a person signs in to a window that opened
+    elsewhere. The progress messages that mean it are the ones auth_login emits.
+    """
+    message = (info.message or "").lower()
+    return "waiting for you" in message or "opening a browser window" in message
+
+
+def _seconds_left(info) -> int | None:
+    """The sign-in countdown, recovered from the progress message that carries it."""
+    match = re.search(r"(\d+)s left", info.message or "")
+    return int(match.group(1)) if match else None
+
+
+def _elapsed(info) -> str:
+    """How long the run has been going, or took. Wall-clock, in the form an operator
+    would say it out loud."""
+    end = info.finished_at or datetime.now(UTC)
+    start = info.started_at
+    if start.tzinfo is None:
+        start = start.replace(tzinfo=UTC)
+    seconds = max(0, int((end - start).total_seconds()))
+    minutes, seconds = divmod(seconds, 60)
+    return f"{minutes}m {seconds:02d}s" if minutes else f"{seconds}s"
+
+
 @router.get("/runs", response_class=HTMLResponse)
 def runs(request: Request, session: Session = Depends(get_session)):
     rows = session.scalars(
@@ -405,21 +480,53 @@ def runs(request: Request, session: Session = Depends(get_session)):
     counts = dict(
         session.execute(select(Evidence.run_id, func.count()).group_by(Evidence.run_id)).all()
     )
+
+    info = manager.current
+    waiting = bool(info) and manager.is_running and _is_waiting(info)
+    phases = info.phases if info else []
+    # A phase the operator is blocking is not "in progress" — it is waiting on them, and
+    # the checklist has to say so rather than spinning as though work were happening.
+    if waiting:
+        phases = [{**p, "state": "waiting" if p["state"] == "active" else p["state"]} for p in phases]
+
+    # The run row the finished summary describes: the newest one for that site.
+    last_run = None
+    if info and not manager.is_running:
+        last_run = next(
+            (r for r in rows if r.site_id in sites and sites[r.site_id].slug == info.slug), None
+        )
+
     return templates.TemplateResponse(
         request,
         "runs.html",
         {
+            "nav": _nav(session),
             "rows": rows,
             "sites": sites,
             "evidence_counts": counts,
             "runnable": _runnable_sites(),
             "job_running": manager.is_running,
             "job_log": manager.log_tail,
+            "waiting": waiting,
+            "seconds_left": _seconds_left(info) if waiting else None,
+            "phases": phases,
+            "elapsed": _elapsed(info) if info else "",
+            "last_run": last_run,
             # While a run is in flight the page reloads itself so progress is visible
             # without the analyst hammering refresh.
             "auto_refresh": manager.is_running,
         },
     )
+
+
+@router.get("/components", response_class=HTMLResponse)
+def components(request: Request, session: Session = Depends(get_session)):
+    """The recurring elements and why they read the way they do.
+
+    It is in the portal rather than in a document because the elements drift: a label that
+    changed in a template is wrong in a screenshot the next day, but right here.
+    """
+    return templates.TemplateResponse(request, "components.html", {"nav": _nav(session)})
 
 
 @router.post("/runs")

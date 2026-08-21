@@ -103,10 +103,13 @@ request on the operator — no funds move — and the portal names those probes 
 
 `ght serve` starts a server-rendered portal: an overview, a **Payees** page holding both
 kinds of payee (numbered accounts and name-only merchants, paged and filterable), the
-evidence trail behind any one account, runs, and alerts. CSV export covers the whole
-filtered set, not just the page on screen. The Runs page can
-launch a collection in the background, one at a time, and every search, export, run and
-login is written to `access_log`.
+saved pages behind any one account, and runs. CSV export covers the whole filtered set, not
+just the page on screen. The Runs page can launch a collection in the background, one at a
+time, and every search, export, run and login is written to `access_log`.
+
+There is no alerts page on purpose: whether collection is healthy is legible from the data
+itself — the overview's "needs review" figure, the badge beside Payees, and the note column
+on runs. `/components` documents the recurring elements and why they read the way they do.
 
 ## Login & session recovery
 

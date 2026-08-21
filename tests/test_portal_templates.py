@@ -1,0 +1,285 @@
+"""Rendering the portal's pages.
+
+The templates carry real logic — which empty state to show, whether a run is working or
+waiting for a person, whether a blank cell means "nothing to collect" or "we failed to
+collect it". None of that is exercised by the pipeline tests, and a broken template is a
+500 on the one page an analyst is looking at.
+
+These render the templates directly with hand-built contexts, so they stay offline and
+cover the states that are otherwise only reachable by driving a real collection.
+"""
+
+from __future__ import annotations
+
+from datetime import UTC, datetime
+from types import SimpleNamespace
+
+import pytest
+
+from ght.api.routes import templates
+
+NOW = datetime(2026, 8, 20, 18, 26, tzinfo=UTC)
+
+
+def render(name: str, **context) -> str:
+    """Render one page the way a route would, minus the request plumbing."""
+    base = {
+        "nav": {"review": 3, "health": "collection healthy", "health_tone": "ok", "now": "2026-08-20 18:26"},
+        "page": "",
+        "auto_refresh": False,
+    }
+    return templates.env.get_template(name).render({**base, **context})
+
+
+def account(**kw):
+    fields = {
+        "id": 1,
+        "channel": "bkash",
+        "account_number": "+8801700000000",
+        "holder_name": "A Holder",
+        "bank_name": None,
+        "branch": None,
+        "operator": None,
+        "account_type": None,
+        "confidence": 0.95,
+        "observation_count": 4,
+        "first_seen_at": NOW,
+        "last_seen_at": NOW,
+        "is_active": True,
+        "needs_review": False,
+    }
+    return SimpleNamespace(**{**fields, **kw})
+
+
+def run_row(**kw):
+    fields = {
+        "id": 7,
+        "site_id": 1,
+        "status": "ok",
+        "candidates_found": 7,
+        "accounts_new": 2,
+        "error": None,
+        "started_at": NOW,
+    }
+    return SimpleNamespace(**{**fields, **kw})
+
+
+def payee_row(**kw):
+    fields = {
+        "id": 1,
+        "kind": "account",
+        "channel": "bkash",
+        "number": "+8801700000000",
+        "name": "A Holder",
+        "bank": None,
+        "confidence": 0.95,
+        "times": 4,
+        "last_seen": NOW,
+        "is_active": True,
+        "needs_review": False,
+    }
+    return SimpleNamespace(**{**fields, **kw})
+
+
+def page(total=1, number=1, size=10):
+    from ght.api.routes import Page
+
+    return Page(number=number, size=size, total=total)
+
+
+SITES = {1: SimpleNamespace(id=1, slug="demo-site", name="Demo Site")}
+
+
+# ----------------------------------------------------------------------- overview
+
+
+def test_overview_with_data_shows_the_figures():
+    html = render(
+        "dashboard.html",
+        totals={"accounts": 25, "active": 12, "review": 3, "sites": 2},
+        by_channel=[("bkash", 8), ("nagad", 4)],
+        runs=[run_row()],
+        newest=[account()],
+        sites=SITES,
+    )
+    assert "Active accounts" in html
+    assert ">12<" in html
+
+
+def test_overview_before_anything_is_collected_offers_a_first_run():
+    html = render(
+        "dashboard.html",
+        totals={"accounts": 0, "active": 0, "review": 0, "sites": 0},
+        by_channel=[],
+        runs=[],
+        newest=[],
+        sites={},
+    )
+    assert "Nothing collected yet" in html
+    assert 'href="/runs"' in html
+
+
+# ----------------------------------------------------------------------- payees
+
+
+def test_a_name_only_payee_reads_as_not_applicable_not_as_missing():
+    """The distinction the whole table hangs on: an em-dash for "there is no number to
+    collect", an italic "unknown" for "there was one and we did not get it"."""
+    html = render(
+        "payees.html",
+        rows=[
+            payee_row(kind="merchant", number=None, bank=None, confidence=None, name="A Merchant"),
+            payee_row(id=2, name=None),
+        ],
+        pagination=page(total=2),
+        channels=["bkash"],
+        channel=None,
+        status="all",
+        q="",
+        per=10,
+        page_sizes=(10, 25),
+    )
+    assert "name only" in html
+    assert "Not applicable" in html  # the title spelling out what the em-dash means
+    assert "unknown" in html
+    assert "name-row" in html
+
+
+def test_filtered_to_nothing_offers_to_clear_rather_than_looking_empty():
+    html = render(
+        "payees.html",
+        rows=[],
+        pagination=page(total=0),
+        channels=["bkash"],
+        channel="bkash",
+        status="all",
+        q="nothing",
+        per=10,
+        page_sizes=(10, 25),
+    )
+    assert "No payees match these filters" in html
+    assert "Clear filters" in html
+
+
+def test_nothing_collected_yet_is_not_the_same_as_no_matches():
+    html = render(
+        "payees.html",
+        rows=[],
+        pagination=page(total=0),
+        channels=[],
+        channel=None,
+        status="all",
+        q="",
+        per=10,
+        page_sizes=(10, 25),
+    )
+    assert "No payees collected yet" in html
+
+
+# ----------------------------------------------------------------------- detail
+
+
+def test_detail_says_what_the_saved_pages_are_for():
+    html = render(
+        "account_detail.html",
+        account=account(),
+        observations=[],
+        sites=[],
+        evidence=[
+            SimpleNamespace(run_id=7, kind="html", path="evidence/x.html", sha256="a" * 64,
+                            bytes=1234, captured_at=NOW)
+        ],
+        evidence_total=1,
+        evidence_shown=20,
+    )
+    assert "Pages saved" in html
+    assert "SHA-256" in html
+
+
+def test_detail_states_the_true_total_when_it_lists_only_the_recent_ones():
+    html = render(
+        "account_detail.html",
+        account=account(),
+        observations=[],
+        sites=[],
+        evidence=[],
+        evidence_total=78,
+        evidence_shown=20,
+    )
+    assert "20 most recent of 78" in html
+
+
+# ----------------------------------------------------------------------- runs
+
+
+def phases(states):
+    names = [("signin", "Sign in to the site"), ("collect", "Read each payment method"),
+             ("store", "Save accounts and evidence")]
+    return [{"name": n, "label": label, "state": s} for (n, label), s in zip(names, states)]
+
+
+def job(running=False, current=None):
+    """Stand in for the run manager the base layout and the runs page read from."""
+    return SimpleNamespace(is_running=running, current=current)
+
+
+def in_flight(**kw):
+    fields = {"slug": "demo-site", "started_at": NOW, "finished_at": None, "returncode": None,
+              "message": "Reading nagad", "step": 2, "total": 8}
+    return SimpleNamespace(**{**fields, **kw})
+
+
+RUNS_BASE = {
+    "rows": [run_row()],
+    "sites": SITES,
+    "evidence_counts": {7: 16},
+    "runnable": [{"slug": "demo-site", "name": "Demo Site", "status": "active", "order_probes": []}],
+    "job_log": [],
+    "last_run": None,
+    "elapsed": "1m 30s",
+}
+
+
+def test_idle_runs_page_offers_to_start_one():
+    html = render("runs.html", job=job(), job_running=False, waiting=False, seconds_left=None,
+                  phases=[], **RUNS_BASE)
+    assert "Start a collection run" in html
+    assert "Run history" in html
+
+
+def test_waiting_for_sign_in_says_it_is_not_an_error():
+    """The state most likely to be misread as a failure or a hang. It has to name itself."""
+    html = render("runs.html", job=job(True, in_flight()), job_running=True, waiting=True,
+                  seconds_left=278, phases=phases(["waiting", "pending", "pending"]), **RUNS_BASE)
+    assert "not an error" in html
+    assert "4:38" in html  # the countdown, from 278 seconds
+    assert "browser window has opened" in html
+    assert "waiting for you" in html  # the phase state, not spinning as though busy
+
+
+def test_a_running_collection_shows_the_checklist_not_a_spinner():
+    html = render("runs.html", job=job(True, in_flight()), job_running=True, waiting=False,
+                  seconds_left=None, phases=phases(["done", "active", "pending"]), **RUNS_BASE)
+    assert "Run in progress" in html
+    assert "in progress" in html
+    assert "refreshing every 5s" in html
+
+
+def test_a_finished_run_summarises_what_it_collected():
+    html = render(
+        "runs.html",
+        job=job(False, in_flight(finished_at=NOW, returncode=0, message="Finished")),
+        job_running=False,
+        waiting=False,
+        seconds_left=None,
+        phases=phases(["done", "done", "done"]),
+        **{**RUNS_BASE, "last_run": run_row(status="partial")},
+    )
+    assert "Run finished" in html
+    assert "pages saved" in html
+    assert "partial" in html
+
+
+@pytest.mark.parametrize("name", ["components.html"])
+def test_the_static_pages_render(name):
+    assert "Design notes" in render(name)

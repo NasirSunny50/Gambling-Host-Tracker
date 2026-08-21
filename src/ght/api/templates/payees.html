@@ -2,87 +2,92 @@
 {% import "_macros.html" as ui %}
 {% set page = "payees" %}
 {% block title %}Payees — Host Tracker{% endblock %}
+{% block heading %}Payees{% endblock %}
+{% block subtitle %}Accounts and named payees across every tracked site{% endblock %}
 {% block body %}
 
 {# Short alias: `pagination` describes the slice being shown. #}
 {% set p = pagination %}
+{% set filtered = q or channel or status != "all" %}
 
-<div class="head">
-  <h1>Payees</h1>
-  <div class="actions">
-    <a class="btn" href="/accounts.csv?channel={{ channel or '' }}&status={{ status }}&q={{ q }}">Download CSV</a>
-  </div>
-</div>
-<p class="sub">Who the deposits are going to. Some payees show an account number; some only
-ever show a business name.</p>
-
+{# The selects apply themselves on change: this is a reading tool, and a filter that needs
+   a second click to take effect gets left half-set. The search box applies on Enter. #}
 <form class="toolbar" method="get" action="/payees">
-  <input type="search" name="q" value="{{ q }}" placeholder="Search number, name or bank">
-  <select name="channel">
+  <span class="search">
+    <span class="icon" aria-hidden="true">&#8981;</span>
+    <input type="search" name="q" value="{{ q }}" placeholder="Search number, name or bank&hellip;">
+  </span>
+  <select name="channel" onchange="this.form.submit()" aria-label="Channel">
     <option value="">All channels</option>
     {% for c in channels %}
       <option value="{{ c }}" {{ "selected" if c == channel }}>{{ ui.CHANNEL_LABELS.get(c, c) }}</option>
     {% endfor %}
   </select>
-  <select name="status">
+  <select name="status" onchange="this.form.submit()" aria-label="Status">
     {% for value, label in [("all","Any status"), ("active","Active"), ("inactive","Gone"), ("review","Needs review")] %}
       <option value="{{ value }}" {{ "selected" if value == status }}>{{ label }}</option>
     {% endfor %}
   </select>
-  <button class="btn-primary" type="submit">Apply</button>
-
-  <label class="per right">
-    Per page
-    <select name="per" onchange="this.form.submit()">
-      {% for size in page_sizes %}
-        <option value="{{ size }}" {{ "selected" if size == per }}>{{ size }}</option>
-      {% endfor %}
-    </select>
-  </label>
+  <input type="hidden" name="per" value="{{ per }}">
+  <a class="btn" href="/accounts.csv?channel={{ channel or '' }}&status={{ status }}&q={{ q }}">&darr; Export CSV</a>
 </form>
 
 {% if rows %}
-{% call ui.table(["Channel", "Number", "Name", "Bank", "Confidence", "#Seen", "Last seen", "Status"]) %}
-  {% for r in rows %}
-  <tr>
-    <td>{{ ui.channel(r.channel) }}</td>
-    <td>
-      {% if r.number %}{{ ui.number_text(r.id, r.number) }}{% else %}<span class="mute">—</span>{% endif %}
-    </td>
-    <td>{{ r.name or "—" }}</td>
-    <td>{{ r.bank or "—" }}</td>
-    <td>
-      {% if r.confidence is not none %}{{ ui.confidence(r.confidence) }}
-      {% else %}<span class="mute">—</span>{% endif %}
-    </td>
-    <td class="num dim">{{ r.times }}&times;</td>
-    <td class="dim mono">{{ r.last_seen | stamp }}</td>
-    <td>
-      {% if r.kind == "merchant" %}{{ ui.tag("Name only", "neutral") }}
-      {% elif r.needs_review %}{{ ui.tag("Needs review", "warn") }}
-      {% elif r.is_active %}{{ ui.tag("Active", "ok") }}
-      {% else %}{{ ui.tag("Gone", "neutral") }}{% endif %}
-    </td>
-  </tr>
-  {% endfor %}
-{% endcall %}
-{{ ui.pager(p, "/payees", {"q": q, "channel": channel or "", "status": status, "per": per}) }}
+<div class="panel">
+  {% call ui.table(["Channel", "Number", "Name", "Bank", "Confidence", "#Seen", "Last seen", "Status"]) %}
+    {% for r in rows %}
+    <tr class="{{ 'name-row' if r.kind == 'merchant' else 'linked' }}"
+        {% if r.kind != "merchant" %}data-href="/accounts/{{ r.id }}"{% endif %}>
+      <td>{{ ui.channel(r.channel) }}</td>
+      <td>{% if r.number %}{{ ui.number_text(r.id, r.number) }}{% else %}{{ ui.na() }}{% endif %}</td>
+      <td>{% if r.name %}<span class="clip" title="{{ r.name }}">{{ r.name }}</span>
+          {%- elif r.kind == "merchant" %}{{ ui.na() }}{% else %}{{ ui.unknown() }}{% endif %}</td>
+      <td>{% if r.bank %}<span class="clip dim">{{ r.bank }}</span>
+          {%- elif r.kind == "merchant" %}{{ ui.na() }}{% else %}{{ ui.unknown() }}{% endif %}</td>
+      <td>{{ ui.confidence(r.confidence) }}</td>
+      <td class="num mono dim">{{ r.times }}</td>
+      <td class="dim mono nowrap">{{ r.last_seen | stamp }}</td>
+      <td>{{ ui.payee_status(r) }}</td>
+    </tr>
+    {% endfor %}
+  {% endcall %}
+  {{ ui.pager(p, "/payees", {"q": q, "channel": channel or "", "status": status, "per": per},
+              page_sizes=page_sizes, per=per, noun="payees" ~ (" (filtered)" if filtered else "")) }}
+</div>
 
-{% elif q or channel or status != "all" %}
-<div class="panel">{{ ui.empty("No matches", "Nothing matches this filter. Try clearing the search or widening the status.") }}</div>
-{% else %}
-<div class="panel">{{ ui.empty("No payees yet", "Run a collection from the Runs page to start pulling payee details.") }}</div>
-{% endif %}
-
-<p class="sub mute" style="margin-top:14px; font-size:12.5px">
-  A payee with no number came from a method that hands off to the payment provider's own
+<p class="footnote">
+  A payee with no number came from a method that hands off to the payment provider&rsquo;s own
   checkout, which names a business instead. Those names change on every deposit request, so
-  they are never marked gone — the value is the pool of names building up over time.
+  they are never marked gone &mdash; the value is the pool of names building up over time.
 </p>
 
+{% elif filtered %}
+  {{ ui.empty(
+      "No payees match these filters",
+      "No account or name matches the current search and filters. Broaden the search or clear
+       the filters to see everything again.",
+      glyph="&#8981;",
+      action_href="/payees",
+      action_label="Clear filters") }}
+{% else %}
+  {{ ui.empty(
+      "No payees collected yet",
+      "Every account and name found during a run appears here. Run collection against a site
+       to begin.",
+      glyph="&#9636;",
+      action_href="/runs",
+      action_label="Go to Runs &rarr;") }}
+{% endif %}
+
 <style>
-  .per { display:inline-flex; align-items:center; gap:8px; color:var(--dim); font-size:13px; }
-  .per select { height:38px; }
+  /* A name-only row is tinted so the eye can tell at a glance that its empty cells are
+     empty by nature, not by failure. */
+  .name-row { background:var(--surface-2); }
+  /* Eight columns have to fit a laptop without a horizontal scrollbar, and the two free-text
+     ones are what push it over. They truncate with the full value on hover. */
+  td .clip { max-width:150px; }
+  thead th, tbody td { padding-left:11px; padding-right:11px; }
+  .footnote { margin:14px 0 0; font-size:12.5px; color:var(--text-3); max-width:760px; }
 </style>
 
 {% endblock %}

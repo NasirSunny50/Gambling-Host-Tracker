@@ -2,66 +2,118 @@
 {% import "_macros.html" as ui %}
 {% set page = "dashboard" %}
 {% block title %}Overview — Host Tracker{% endblock %}
+{% block heading %}Overview{% endblock %}
+{% block subtitle %}What we have, and whether collection is healthy{% endblock %}
 {% block body %}
 
-<div class="head">
-  <h1>Overview</h1>
-  <div class="actions"><a class="btn" href="/runs">Run a collection</a></div>
-</div>
-<p class="sub">Payment accounts advertised on the deposit pages we track.</p>
-
-<div class="stat-grid">
-  {{ ui.stat(totals.active, "Active accounts", href="/payees?status=active", tone="accent") }}
-  {{ ui.stat(totals.accounts, "Seen all-time", href="/payees") }}
-  {{ ui.stat(totals.review, "Needs review", href="/payees?status=review", tone="warn" if totals.review else "") }}
-  {{ ui.stat(totals.sites, "Sites tracked", href="/runs") }}
-</div>
-
-{{ ui.section("Active accounts by channel") }}
-{% if by_channel %}
-{% call ui.table(["Channel", "#Active"]) %}
-  {% for channel, count in by_channel %}
-  <tr>
-    <td><a href="/payees?channel={{ channel }}&status=active" style="text-decoration:none">{{ ui.channel(channel) }}</a></td>
-    <td class="num">{{ count }}</td>
-  </tr>
-  {% endfor %}
-{% endcall %}
+{% if not totals.accounts and not runs %}
+  {{ ui.empty(
+      "Nothing collected yet",
+      "This is where the collection summary will live — active accounts, the newest finds,
+       and recent runs. Start a run to populate it.",
+      glyph="&#9716;",
+      action_href="/runs",
+      action_label="Start first run &rarr;") }}
 {% else %}
-<div class="panel">{{ ui.empty("Nothing collected yet", "Run a collection from the Runs page to pull payee details from the configured deposit pages.") }}</div>
+
+<div class="figures">
+  {{ ui.figure(totals.active, "Active accounts", "seen in the last 48 hours", href="/payees?status=active") }}
+  {{ ui.figure(totals.accounts, "Seen all-time", "incl. gone and name-only", href="/payees") }}
+  {{ ui.figure(totals.review, "Needs review", "low-confidence finds", href="/payees?status=review",
+               tone="warn" if totals.review else "") }}
+  {{ ui.figure(totals.sites, "Sites tracked", "configured targets", href="/runs") }}
+</div>
+
+<div class="split">
+  <section class="panel">
+    <h2>Active accounts by channel</h2>
+    {% if by_channel %}
+      {% set top = by_channel | map(attribute=1) | max %}
+      <div class="bars">
+        {% for channel, count in by_channel %}
+        <a class="bar-row" href="/payees?channel={{ channel }}&status=active">
+          <span class="bar-name">{{ ui.channel(channel) }}</span>
+          <span class="bar-track"><span class="bar-fill ch-{{ channel }}"
+                style="width: {{ (count / top * 100) | round(0) | int }}%"></span></span>
+          <span class="bar-n">{{ count }}</span>
+        </a>
+        {% endfor %}
+      </div>
+    {% else %}
+      <div class="quiet-empty">No account is currently active. Every number collected so far
+        has rotated out — the Payees list still holds them.</div>
+    {% endif %}
+  </section>
+
+  <section class="panel">
+    <h2>Newest accounts</h2>
+    {% if newest %}
+      <div class="newest">
+        {% for a in newest %}
+        <a class="newest-row" href="/accounts/{{ a.id }}">
+          <span class="newest-ch">{{ ui.channel(a.channel) }}</span>
+          <span class="newest-id">
+            <span class="mono strong">{{ a.account_number }}</span>
+            <span class="newest-sub">{{ a.holder_name or a.bank_name or "holder unknown" }}</span>
+          </span>
+          <span class="newest-when mono mute">{{ a.first_seen_at | stamp }}</span>
+          {{ ui.account_state(a) }}
+        </a>
+        {% endfor %}
+      </div>
+    {% else %}
+      <div class="quiet-empty">No numbered account has been collected yet.</div>
+    {% endif %}
+  </section>
+</div>
+
+<section class="panel" style="margin-top:14px">
+  <h2>Recent runs</h2>
+  {% call ui.table(["Started", "Site", "Outcome", "#Found", "#New", "Note"]) %}
+    {% for r in runs %}
+    <tr>
+      <td class="dim mono nowrap">{{ r.started_at | stamp }}</td>
+      <td class="dim">{{ sites[r.site_id].slug if r.site_id in sites else r.site_id }}</td>
+      <td>{{ ui.outcome_pill(r.status) }}</td>
+      <td class="num mono">{{ r.candidates_found }}</td>
+      <td class="num mono {{ '' if r.accounts_new else 'mute' }}"
+          style="{{ 'color:var(--ok)' if r.accounts_new }}">{{ r.accounts_new }}</td>
+      <td class="{{ 'dim' if r.error else 'mute' }}">{{ (r.error or "—")[:70] }}</td>
+    </tr>
+    {% else %}
+    <tr><td colspan="6"><div class="quiet-empty">No runs recorded yet.</div></td></tr>
+    {% endfor %}
+  {% endcall %}
+</section>
+
 {% endif %}
 
-{{ ui.section("Newest accounts") }}
-{% if newest %}
-{% call ui.table(["Channel", "Number", "Holder", "Bank", "First seen"]) %}
-  {% for a in newest %}
-  <tr>
-    <td>{{ ui.channel(a.channel) }}</td>
-    <td>{{ ui.number(a) }}</td>
-    <td>{{ a.holder_name or "—" }}</td>
-    <td>{{ a.bank_name or "—" }}</td>
-    <td class="dim">{{ a.first_seen_at | age }}</td>
-  </tr>
-  {% endfor %}
-{% endcall %}
-{% else %}
-<div class="panel">{{ ui.empty("No accounts yet") }}</div>
-{% endif %}
+<style>
+  .split { display:grid; grid-template-columns:1fr 1.4fr; gap:14px; align-items:start; }
+  @media (max-width:1000px) { .split { grid-template-columns:1fr; } }
 
-{{ ui.section("Recent runs") }}
-{% call ui.table(["Started", "Site", "Status", "#Candidates", "#New", "Note"]) %}
-  {% for r in runs %}
-  <tr>
-    <td class="dim">{{ r.started_at | age }}</td>
-    <td>{{ sites[r.site_id].slug if r.site_id in sites else r.site_id }}</td>
-    <td>{{ ui.tag(r.status, "ok" if r.status == "ok" else ("warn" if r.status == "partial" else "bad")) }}</td>
-    <td class="num">{{ r.candidates_found }}</td>
-    <td class="num">{{ r.accounts_new }}</td>
-    <td class="dim">{{ (r.error or "—")[:60] }}</td>
-  </tr>
-  {% else %}
-  <tr><td colspan="6">{{ ui.empty("No runs recorded yet") }}</td></tr>
-  {% endfor %}
-{% endcall %}
+  .bars { padding:6px 8px; }
+  .bar-row { display:flex; align-items:center; gap:12px; padding:8px; border-radius:8px;
+             color:var(--text); }
+  .bar-row:hover { background:var(--surface-2); text-decoration:none; }
+  .bar-name { width:130px; flex:none; }
+  .bar-track { flex:1; height:8px; background:var(--surface-2); border-radius:999px; overflow:hidden; }
+  .bar-fill { display:block; height:100%; border-radius:999px;
+              background:var(--ch, var(--ch-neutral)); }
+  .bar-n { font-family:var(--mono); font-weight:700; min-width:22px; text-align:right; }
+
+  .newest-row { display:flex; align-items:center; gap:12px; padding:10px 16px;
+                border-bottom:1px solid var(--border); color:var(--text); }
+  .newest-row:last-child { border-bottom:none; }
+  .newest-row:hover { background:var(--surface-2); text-decoration:none; }
+  .newest-ch { width:128px; flex:none; }
+  .newest-id { flex:1; min-width:0; display:flex; flex-direction:column; }
+  .newest-id .strong { font-weight:600; font-size:13px; }
+  .newest-sub { font-size:12px; color:var(--text-3); overflow:hidden; text-overflow:ellipsis;
+                white-space:nowrap; }
+  .newest-when { font-size:12px; white-space:nowrap; }
+
+  .quiet-empty { padding:28px 20px; color:var(--text-2); text-align:center; font-size:13px; }
+</style>
 
 {% endblock %}
