@@ -74,6 +74,7 @@ def payee_row(**kw):
         "bank": None,
         "confidence": 0.95,
         "times": 4,
+        "first_seen": NOW,
         "last_seen": NOW,
         "is_active": True,
         "needs_review": False,
@@ -103,7 +104,8 @@ def test_overview_with_data_shows_the_figures():
         by_channel=[("bkash", 8), ("nagad", 4)],
         first_run_at=NOW,
         runs=[run_row()],
-        newest=[account()],
+        newest=[payee_row(), payee_row(id=9, kind="merchant", number=None, name="A Merchant",
+                          channel="nagad", bank=None)],
         sites=SITES,
     )
     assert "Accounts found" in html
@@ -113,6 +115,9 @@ def test_overview_with_data_shows_the_figures():
     # NOW is 18:26 UTC, which is the 21st in Dhaka - the caption follows the reader's day,
     # not the server's.
     assert "since 21/08/2026" in html
+    # A name-only payee is one of the accounts, and it is reachable from here.
+    assert "A Merchant" in html
+    assert 'href="/merchants/9"' in html
 
 
 def test_overview_before_anything_is_collected_offers_a_first_run():
@@ -486,3 +491,16 @@ def test_the_schedule_is_visible_while_a_collection_is_in_flight():
     )
     assert "Run in progress" in html
     assert "Every 30 minutes" in html
+
+
+def test_the_overview_counts_and_charts_the_same_population():
+    """A name-only payee is a payee. Counting it in the figure but not the bars, or in the
+    list but not the count, is how the overview came to disagree with itself."""
+    from ght.api.routes import _payee_query
+
+    # Both read the same statement, so they cannot drift apart.
+    figure = _payee_query(None, None).order_by(None).subquery()
+    bars = _payee_query(None, None).order_by(None).subquery()
+    assert [c.name for c in figure.columns] == [c.name for c in bars.columns]
+    assert "channel" in [c.name for c in figure.columns]
+    assert "first_seen" in [c.name for c in figure.columns]

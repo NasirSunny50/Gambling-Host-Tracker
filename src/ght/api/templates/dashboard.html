@@ -17,7 +17,7 @@
 {% else %}
 
 <div class="figures">
-  {{ ui.figure(totals.accounts, "Accounts found", "unique numbers, all time", href="/payees") }}
+  {{ ui.figure(totals.accounts, "Accounts found", "numbered and name-only, all time", href="/payees") }}
   {{ ui.figure(totals.runs, "Collections run",
                ("since " ~ (first_run_at | day)) if first_run_at else "none yet", href="/runs") }}
   {{ ui.figure(totals.sites, "Sites tracked", "configured targets", href="/runs") }}
@@ -25,7 +25,7 @@
 
 <div class="split">
   <section class="panel">
-    <h2>Active accounts by channel</h2>
+    <h2>Accounts by channel</h2>
     {% if by_channel %}
       {% set top = by_channel | map(attribute=1) | max %}
       <div class="bars">
@@ -48,20 +48,24 @@
     <h2>Newest accounts</h2>
     {% if newest %}
       <div class="newest">
-        {% for a in newest %}
-        <a class="newest-row" href="/accounts/{{ a.id }}">
-          <span class="newest-ch">{{ ui.channel(a.channel) }}</span>
+        {% for r in newest %}
+        <a class="newest-row"
+           href="{{ ('/merchants/' if r.kind == 'merchant' else '/accounts/') ~ r.id }}">
+          <span class="newest-ch">{{ ui.channel(r.channel) }}</span>
           <span class="newest-id">
-            <span class="mono strong">{{ a.account_number }}</span>
-            <span class="newest-sub">{{ a.holder_name or a.bank_name or "holder unknown" }}</span>
+            {% if r.number %}<span class="mono strong">{{ r.number }}</span>
+            {% else %}<span class="strong">{{ r.name }}</span>{% endif %}
+            <span class="newest-sub">
+              {%- if r.kind == "merchant" %}named at checkout &mdash; no number published
+              {%- else %}{{ r.name or r.bank or "holder unknown" }}{% endif -%}
+            </span>
           </span>
-          <span class="newest-when mono mute">{{ a.first_seen_at | stamp }}</span>
-          {{ ui.account_state(a) }}
+          <span class="newest-when mono mute">{{ r.first_seen | stamp }}</span>
         </a>
         {% endfor %}
       </div>
     {% else %}
-      <div class="quiet-empty">No numbered account has been collected yet.</div>
+      <div class="quiet-empty">Nothing collected yet.</div>
     {% endif %}
   </section>
 </div>

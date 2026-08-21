@@ -155,10 +155,14 @@ def _nav(session: Session) -> dict:
 
 @router.get("/", response_class=HTMLResponse)
 def dashboard(request: Request, session: Session = Depends(get_session)):
+    # A payee is a payee. A name-only one has no number to carry to a blocklist, but it is
+    # still a party collecting deposits, and leaving it out of the count made a run that
+    # found one report that it had found nothing.
+    payees = session.scalar(
+        select(func.count()).select_from(_payee_query(None, None).order_by(None).subquery())
+    ) or 0
     totals = {
-        "accounts": session.scalar(select(func.count()).select_from(Account)) or 0,
-        "active": session.scalar(select(func.count()).select_from(Account).where(Account.is_active))
-        or 0,
+        "accounts": payees,
         # What we are tracking, not what we have ever tracked. The sites table is a
         # historical record - a site collected once keeps its rows so its runs and evidence
         # still mean something - so counting it answers a different question than the one
@@ -171,17 +175,22 @@ def dashboard(request: Request, session: Session = Depends(get_session)):
     }
     first_run_at = session.scalar(select(func.min(CollectionRun.started_at)))
 
+    # Grouped over the same population the figure counts, so the bars add up to it.
+    payee_rows = _payee_query(None, None).order_by(None).subquery()
     by_channel = session.execute(
-        select(Account.channel, func.count())
-        .where(Account.is_active)
-        .group_by(Account.channel)
+        select(payee_rows.c.channel, func.count())
+        .group_by(payee_rows.c.channel)
         .order_by(func.count().desc())
     ).all()
 
     runs = session.scalars(
         select(CollectionRun).order_by(CollectionRun.started_at.desc()).limit(8)
     ).all()
-    newest = session.scalars(select(Account).order_by(Account.first_seen_at.desc()).limit(8)).all()
+    # Newest of either kind, for the same reason.
+    newest_rows = _payee_query(None, None).order_by(None).subquery()
+    newest = session.execute(
+        select(newest_rows).order_by(newest_rows.c.first_seen.desc()).limit(8)
+    ).all()
     sites = {s.id: s for s in session.scalars(select(Site))}
 
     return templates.TemplateResponse(
@@ -314,6 +323,7 @@ def _payee_query(channel: str | None, q: str | None, run: int | None = None):
         Account.bank_name.label("bank"),
         Account.confidence.label("confidence"),
         Account.observation_count.label("times"),
+        Account.first_seen_at.label("first_seen"),
         Account.last_seen_at.label("last_seen"),
         Account.is_active.label("is_active"),
         Account.needs_review.label("needs_review"),
@@ -342,6 +352,7 @@ def _payee_query(channel: str | None, q: str | None, run: int | None = None):
             literal(None, String).label("bank"),
             literal(None).label("confidence"),
             func.count().label("times"),
+            func.min(MerchantSighting.seen_at).label("first_seen"),
             func.max(MerchantSighting.seen_at).label("last_seen"),
             literal(None).label("is_active"),
             literal(None).label("needs_review"),
@@ -748,6 +759,29 @@ def stop_schedule(request: Request, session: Session = Depends(get_session)):
     return RedirectResponse("/runs", status_code=303)
 
 
+def _merchant_rows(channel: str | None, q: str | None, run: int | None):
+    """Name-only payees, grouped the way the Payees table groups them."""
+    stmt = (
+        select(
+            MerchantSighting.merchant_name,
+            MerchantSighting.channel,
+            func.count().label("times"),
+            func.min(MerchantSighting.seen_at),
+            func.max(MerchantSighting.seen_at),
+        )
+        .join(Site, Site.id == MerchantSighting.site_id)
+        .group_by(MerchantSighting.merchant_name, MerchantSighting.channel)
+        .order_by(MerchantSighting.channel)
+    )
+    if run:
+        stmt = stmt.where(MerchantSighting.run_id == run)
+    if channel:
+        stmt = stmt.where(MerchantSighting.channel == channel)
+    if q:
+        stmt = stmt.where(MerchantSighting.merchant_name.like(f"%{q.strip()}%"))
+    return stmt
+
+
 @router.get("/accounts.csv")
 def accounts_csv(
     request: Request,
@@ -756,20 +790,28 @@ def accounts_csv(
     run: int | None = None,
     session: Session = Depends(get_session),
 ):
-    """The same rows the table is showing, as a file the AML team can hand on."""
+    """The same rows the table is showing, as a file the AML team can hand on.
+
+    Both kinds of payee, because both are what the table shows. A name-only one has no
+    number to blocklist, but leaving it out of the export would mean the file quietly
+    disagreed with the screen it was downloaded from — and the names are the whole of what
+    is collectable from the methods that publish no wallet.
+    """
     rows = session.scalars(_account_query(channel, q, run).order_by(Account.channel)).all()
+    merchants = session.execute(_merchant_rows(channel, q, run)).all()
     _log(
         session,
         request,
         "export",
         {"channel": channel, "q": q, "run": run},
-        len(rows),
+        len(rows) + len(merchants),
     )
 
     buffer = io.StringIO()
     writer = csv.writer(buffer)
     writer.writerow(
         [
+            "kind",
             "channel",
             "account_number",
             "holder_name",
@@ -787,6 +829,7 @@ def accounts_csv(
     for account in rows:
         writer.writerow(
             [
+                "account",
                 account.channel,
                 account.account_number,
                 account.holder_name or "",
@@ -801,6 +844,27 @@ def accounts_csv(
                 account.last_seen_at.isoformat() if account.last_seen_at else "",
             ]
         )
+    for name, merchant_channel, times, first_seen, last_seen in merchants:
+        writer.writerow(
+            [
+                "name_only",
+                merchant_channel,
+                "",  # there is no number; the method never publishes one
+                name,
+                "",
+                "",
+                "",
+                "",
+                "",
+                # A name is never marked gone: it rotates per deposit request, so its
+                # absence today says nothing about whether it is still in use.
+                "",
+                times,
+                first_seen.isoformat() if first_seen else "",
+                last_seen.isoformat() if last_seen else "",
+            ]
+        )
+
     buffer.seek(0)
     stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M")
     return StreamingResponse(
