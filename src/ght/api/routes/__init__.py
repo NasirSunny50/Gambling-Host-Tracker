@@ -450,7 +450,10 @@ def _is_waiting(info) -> bool:
     elsewhere. The progress messages that mean it are the ones auth_login emits.
     """
     message = (info.message or "").lower()
-    return "waiting for you" in message or "opening a browser window" in message
+    return any(
+        phrase in message
+        for phrase in ("waiting for you", "opening a browser window", "opening a window for you")
+    )
 
 
 def _seconds_left(info) -> int | None:

@@ -305,3 +305,26 @@ def test_a_failed_run_is_not_dressed_up_as_a_finished_one():
     assert "View collected payees" not in html
     assert "Login session expired" in html
     assert "phase--stopped" in html
+
+
+# ------------------------------------------------ which progress messages mean "your turn"
+
+
+def test_the_portal_knows_when_a_run_is_waiting_on_a_person():
+    """Each of these is a real message the sign-in step emits. Reading any of them as
+    ordinary progress would show a spinner while the run stands still waiting for someone."""
+    from ght.api.routes import _is_waiting
+
+    waiting = [
+        "Waiting for you to sign in - a browser window is open",
+        "Still waiting for you to sign in - 240s left",
+        "Signed out - opening a browser window for you",
+        "The site asked for a CAPTCHA - opening a window for you",
+        "Could not sign in unattended (bad_credentials) - opening a window for you",
+    ]
+    for message in waiting:
+        assert _is_waiting(SimpleNamespace(message=message)) is True, message
+
+    working = ["Checking the site sign-in", "Signing in", "Already signed in", "Reading nagad"]
+    for message in working:
+        assert _is_waiting(SimpleNamespace(message=message)) is False, message

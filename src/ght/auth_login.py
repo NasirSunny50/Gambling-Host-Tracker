@@ -10,11 +10,17 @@ Only a genuinely dead session brings up a browser:
   operator to sign in by hand, solving the CAPTCHA themselves. This is the only thing that
   reliably gets past bot protection, at the cost of needing a person at the machine.
 
-* **Headless** (the default) fills supplied credentials and submits, watching for a success
-  marker. If a CAPTCHA or 2FA appears it gives up — those cannot be solved automatically.
+* **Headless** fills credentials and submits, watching for a success marker. If a CAPTCHA
+  or 2FA appears it gives up — those cannot be solved automatically, and this does not try.
 
-No credentials are stored; in assisted mode the operator types them into the window. The
-saved session is written in the wrapped format the browser fetcher reads.
+An assisted site takes both, in that order: the unattended attempt runs first, and the
+window only opens when the site actually challenges it. On a day the challenge does not
+appear, nobody is needed at all; on a day it does, the window arrives pre-filled with
+only the CAPTCHA left to do.
+
+Credentials come from the environment (see ``ght.credentials``) and are never written to
+the source configs, the database, a log line or a run report. The saved session is written
+in the wrapped format the browser fetcher reads.
 """
 
 from __future__ import annotations
@@ -24,6 +30,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ght.config import settings
+from ght.credentials import env_names
+from ght.credentials import for_site as credentials_for
 from ght.sources import SourceConfig
 
 # How long the assisted flow waits for a human to finish. Generous: a person may need to
@@ -74,9 +82,17 @@ def perform_login(
 ) -> LoginResult:
     """Sign in and save the session. Never raises for an expected failure — returns why.
 
-    Credentials are optional: in assisted mode the operator can type them into the visible
-    window themselves, so they are only pre-filled when supplied. ``on_progress`` receives
-    updates, which matters most here — this is the step that waits on a human.
+    The order is deliberate, cheapest and least intrusive first:
+
+    1. Is the saved session still good? Then nothing happens at all.
+    2. With credentials configured, try to sign in **unattended** — fill, submit, watch.
+       No window, nobody needed. If the site answers with a CAPTCHA or 2FA this stops and
+       says so; it is never treated as something to get around.
+    3. Only then, on an assisted site, open the visible window — pre-filled from the same
+       credentials, so what is left for the person is the challenge and the button.
+
+    ``on_progress`` receives updates, which matters most here: this is the step that can
+    end up waiting on a human.
     """
     login = config.login
     if login is None:
@@ -85,9 +101,11 @@ def perform_login(
         return LoginResult(False, "config", "no auth_state path configured to save into")
 
     try:
-        from playwright.sync_api import sync_playwright
+        import playwright.sync_api  # noqa: F401
     except ImportError:
         return LoginResult(False, "browser", 'playwright not installed; pip install -e ".[browser]"')
+
+    from ght.progress import report
 
     assisted = login.assisted
     timeout_ms = (config.timeout or settings.request_timeout) * 1000
@@ -98,15 +116,60 @@ def perform_login(
     if assisted and _already_signed_in(config, timeout_ms, on_progress):
         return LoginResult(True, "ok", "already signed in")
 
-    if assisted:
-        from ght.progress import report
+    if not username and not password:
+        credentials = credentials_for(config.slug)
+        username, password = credentials.username, credentials.password
 
+    if username and password:
+        report(on_progress, "signin", "Signing in")
+        outcome = _attempt(config, username, password, timeout_ms, headed=False)
+        if outcome.ok:
+            return outcome
+        if not assisted:
+            return outcome
+        # A challenge is the expected answer from a site that shows one, not a fault.
+        report(
+            on_progress,
+            "signin",
+            "The site asked for a CAPTCHA — opening a window for you"
+            if outcome.reason == "challenge"
+            else f"Could not sign in unattended ({outcome.reason}) — opening a window for you",
+        )
+    elif assisted:
         report(on_progress, "signin", "Signed out — opening a browser window for you")
 
+    if not assisted:
+        return LoginResult(
+            False,
+            "config",
+            f"no credentials configured for {config.slug}: set {' and '.join(env_names(config.slug))}",
+        )
+
+    return _attempt(config, username, password, timeout_ms, headed=True, on_progress=on_progress)
+
+
+def _attempt(
+    config: SourceConfig,
+    username: str,
+    password: str,
+    timeout_ms: int,
+    headed: bool,
+    on_progress=None,
+) -> LoginResult:
+    """One sign-in attempt in its own browser, saving the session if it took.
+
+    ``headed`` picks which half of the job this is: a hidden browser filling the form
+    itself, or a visible one a person finishes. Everything after the form — proving the
+    session on the page collection needs, and saving it — is the same either way, and is
+    what keeps a login-form heuristic from being mistaken for a working session.
+    """
+    from playwright.sync_api import sync_playwright
+
+    login = config.login
     try:
         with sync_playwright() as pw:
             try:
-                browser, used_channel = _launch(pw, config.browser_channel, headed=assisted)
+                browser, used_channel = _launch(pw, config.browser_channel, headed=headed)
             except RuntimeError as exc:
                 return LoginResult(False, "browser", str(exc))
 
@@ -119,7 +182,7 @@ def perform_login(
             try:
                 page.goto(login.url, timeout=timeout_ms, wait_until="domcontentloaded")
 
-                if assisted:
+                if headed:
                     outcome = _assisted(page, config, username, password, timeout_ms, on_progress)
                 else:
                     outcome = _headless(page, login, username, password, timeout_ms)
@@ -132,7 +195,7 @@ def perform_login(
                 # and every probe then fails.
                 page.goto(_target_url(config), timeout=timeout_ms, wait_until="domcontentloaded")
                 page.wait_for_timeout(2000)
-                if not _page_is_signed_in(page, config):
+                if not _page_is_signed_in(page, config, require_frame=True):
                     return LoginResult(
                         False,
                         "error",
@@ -142,7 +205,13 @@ def perform_login(
                 state = context.storage_state()
                 user_agent = page.evaluate("navigator.userAgent")
                 _save_state(config.auth_state, state, user_agent, used_channel)
-                return LoginResult(True, "ok", "signed in and saved the session")
+                return LoginResult(
+                    True,
+                    "ok",
+                    "signed in through the login window"
+                    if headed
+                    else "signed in automatically and saved the session",
+                )
             finally:
                 context.close()
                 browser.close()
@@ -200,15 +269,17 @@ def _payment_frame_appears(page, config: SourceConfig, timeout_ms: int = FRAME_W
     return False
 
 
-def _page_is_signed_in(page, config: SourceConfig) -> bool:
+def _page_is_signed_in(page, config: SourceConfig, require_frame: bool = False) -> bool:
     """Judge a loaded page the same way the collector does.
 
     Checking the *deposit* page rather than the login page matters: a site can bounce an
     anonymous visitor off its login URL too, so "we left the login page" is not evidence of
     anything. Being served the page we actually want is.
 
-    And for a site whose deposit UI is an embedded app, being served the page is not
-    enough — the app inside it has to load, because that is what collection reads.
+    ``require_frame`` adds the collector's real test — that the embedded payment app
+    loads — and belongs only where the page being judged *is* the deposit page. In the
+    assisted window the operator can land anywhere the site sends them after sign-in, and
+    demanding a deposit iframe on the homepage would reject a perfectly good sign-in.
     """
     url = page.url or ""
     if config.logged_out_url and config.logged_out_url in url:
@@ -222,7 +293,7 @@ def _page_is_signed_in(page, config: SourceConfig) -> bool:
                 return False
         except Exception:  # noqa: BLE001 - an unreadable page proves nothing either way
             return False
-    if config.frame:
+    if require_frame and config.frame:
         return _payment_frame_appears(page, config)
     return True
 
@@ -248,7 +319,7 @@ def _already_signed_in(config: SourceConfig, timeout_ms: int, on_progress=None) 
             try:
                 page.goto(_target_url(config), timeout=timeout_ms, wait_until="domcontentloaded")
                 page.wait_for_timeout(2000)
-                signed_in = _page_is_signed_in(page, config)
+                signed_in = _page_is_signed_in(page, config, require_frame=True)
                 if signed_in and config.auth_state:
                     report(on_progress, "signin", "Already signed in")
                     # Save the refreshed cookies so the session keeps rolling forward.

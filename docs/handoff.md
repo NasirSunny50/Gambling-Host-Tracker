@@ -43,18 +43,38 @@ drifts often; a stale selector is a config fix, not a code fix.
 
 ## Recent state
 
-Just finished: the design pass from `design/Portal Pages Design Scope.zip` is implemented
-across every template — sidebar shell with a light/dark toggle, channel marks, status and
-outcome pills, confidence as percentage + bar + provenance word, the distinction between
-"not applicable" and "unknown", and the run states (idle, running, waiting for sign-in,
-finished). New page: **Components & notes** at `/components`, which shows the recurring
-elements and the reasoning behind them. `tests/test_portal_templates.py` renders every page
-offline, including the run states that otherwise need a live collection to reach.
+The portal design pass from `design/Portal Pages Design Scope.zip` is implemented across
+every template - sidebar shell with a light/dark toggle, channel marks, status and outcome
+pills, confidence as percentage + bar + provenance word, the "not applicable" vs "unknown"
+distinction, and the run states (idle, running, waiting for sign-in, finished). New page:
+**Components & notes** at `/components`.
 
-`docs/design-brief.md` is the brief that pass was made against.
+Then two faults behind one screenshot - a failed run shown with three green ticks and a
+"Run finished" heading:
+
+- The checklist was keyed on the subprocess exit code, and `ght run` exits 0 even when it
+  records a failed collection. Failure now travels with the phase: progress updates carry
+  an `ok` flag, the pipeline names the phase it stopped at, and the manager keeps that.
+- The session check judged the account page while collection needs the embedded payment
+  app, which is what an expired session is actually refused. Verified live: the page loads
+  clean and the `/paysystems/deposit` frame never appears. The check now waits for that
+  frame (`require_frame=True`, and only where the page being judged *is* the deposit page -
+  the assisted window must not demand it, or a good sign-in on the homepage is rejected).
+
+Sign-in is now automated as far as the site allows: `ght.credentials` reads
+`GHT_LOGIN_<SLUG>_USERNAME` / `_PASSWORD` from the environment or `.env`, and
+`perform_login` tries unattended first, falling back to the visible window only when the
+site answers with a CAPTCHA or 2FA. Those are never worked around. 1xBet challenges nearly
+every sign-in, so there the credentials save the typing rather than the person. Sessions
+also roll forward now - a signed-in fetch writes the refreshed cookies back, guarded so a
+logged-out capture can never overwrite a good session.
+
+`docs/design-brief.md` is the brief the design pass was made against.
 
 ## Known open items
 
+- Nobody has run a collection since the sign-in changes. The stored session is known dead,
+  so the next run will open the window - that is the path to watch.
 - Collection could be ~2× faster by reusing one browser across probes instead of launching
   per probe. Not done — was judged not worth the risk yet.
 - Portal has **no authentication** and binds to loopback. It must sit behind an
@@ -64,7 +84,9 @@ offline, including the run states that otherwise need a live collection to reach
 
 - Verify against the real thing rather than assuming — run it, screenshot it, check the DB.
 - Tests must stay offline and pass before committing.
-- Never enter credentials or defeat a CAPTCHA; the operator signs in themselves.
+- A CAPTCHA is never defeated or worked around; when one appears, a person clears it.
+  Credentials the operator puts in `.env` may be filled into the site's own login form, and
+  live nowhere else — not in `sources/*.yaml`, the database, a log line or a run report.
 - Nothing sensitive in git: `data/` (sessions, DB, evidence) and `.env` are ignored, and
   real collected account numbers must not go into code, tests, or config comments.
 - Commit and push after each working change, with a message explaining *why*.

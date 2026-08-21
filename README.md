@@ -114,16 +114,31 @@ on runs. `/components` documents the recurring elements and why they read the wa
 ## Login & session recovery
 
 Deposit pages sit behind a login, and the sites use bot protection (a CAPTCHA on sign-in)
-that can't be solved automatically. So login is **assisted**, not headless:
+that can't be solved automatically. A run therefore tries the cheapest thing that can work
+and escalates only when it has to:
 
-- A site with a `login:` block marked `assisted: true` (form selectors + a success marker)
-  supports one-click sign-in.
-- When **Run collection** finds the session expired, a **visible browser window opens** for
-  the operator to sign in — solving the CAPTCHA and pressing the site's login button
-  themselves. The moment the success marker appears, the session is captured and collection
-  continues in the same run (an `auth_refreshed` alert records the self-heal).
-- No credentials are stored anywhere: the person types them into the window. If nobody
-  completes the sign-in within a few minutes, the run reports the expiry and stops.
+1. **Is the saved session still good?** Checked headlessly, by loading the deposit page and
+   waiting for the payment app the collector actually reads — not just the page around it.
+   A site will serve the shell to an expired session and refuse only the embedded app, so
+   the shallower check reports "signed in" and the first probe then reports being signed
+   out. If the session is good, nothing is shown at all.
+2. **Sign in unattended.** With credentials in `.env`
+   (`GHT_LOGIN_<SLUG>_USERNAME` / `_PASSWORD`) the run fills the form and submits in a
+   hidden browser. Nobody is needed. If the site answers with a CAPTCHA or 2FA it stops
+   there — those are never worked around.
+3. **Ask the operator.** A **visible browser window opens**, already filled in, leaving
+   the CAPTCHA and the button. The moment the success marker appears the session is
+   captured and collection continues *in the same run* (an `auth_refreshed` alert records
+   the self-heal). If nobody finishes within a few minutes, the run reports the expiry and
+   stops.
+
+1xBet shows its CAPTCHA on essentially every sign-in, so in practice step 3 is where it
+lands there — the credentials save the typing, not the CAPTCHA. Sites that do not
+challenge sign in with nobody present at all.
+
+Credentials live only in `.env`, which is gitignored, and never reach `sources/*.yaml`, the
+database, a log line or a run report. A session that is still signed in is also written
+back after each fetch, so it rolls forward instead of ageing out on the site's schedule.
 
 > **This needs a desktop.** The assisted window has to appear on a screen the operator is
 > looking at, so run the portal on that machine (`scripts\Start.bat` does this). A headless

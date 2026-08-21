@@ -216,9 +216,9 @@ def _sign_in(config: SourceConfig, on_progress: ProgressFn | None = None) -> tup
     """Establish a live session before collecting, and report whether it worked.
 
     A run starts here rather than discovering halfway through that the session died. If the
-    site still recognises us it redirects away from the login page and this returns almost
-    immediately; otherwise a window waits for the operator to sign in (solving the CAPTCHA
-    themselves). No credentials are stored - the person types them into the window.
+    saved session still works this returns in a couple of seconds. Otherwise the sign-in is
+    attempted unattended from credentials in the environment, and only a site that answers
+    with a CAPTCHA or 2FA brings up a window for the operator - who solves that themselves.
     """
     if config.login is None:
         return False, "no login flow is configured"
@@ -231,6 +231,8 @@ def _sign_in(config: SourceConfig, on_progress: ProgressFn | None = None) -> tup
     if result.reason == "timeout":
         return False, "the sign-in window was not completed in time"
     if result.reason == "challenge":
+        # Only reachable on a site not marked assisted: an assisted one answers a challenge
+        # by opening the window instead of giving up here.
         return False, "a CAPTCHA or 2FA appeared; this site needs assisted login (assisted: true)"
     return False, f"sign-in failed: {result.detail or result.reason}"
 
