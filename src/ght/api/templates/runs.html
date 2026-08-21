@@ -6,117 +6,11 @@
 {% block subtitle %}Start collection and watch it work{% endblock %}
 {% block body %}
 
-{% if waiting %}
-  {# The hardest moment in the whole product: nothing is broken, but nothing continues
-     until a person signs in. Calm blue rather than red, an explicit "not an error", and
-     the three facts that resolve it. #}
-  <section class="waiting">
-    <div class="waiting-head">
-      <span class="waiting-icon" aria-hidden="true">&#8599;</span>
-      <div class="waiting-say">
-        <div class="eyebrow">Waiting for you &middot; not an error</div>
-        <h2>Sign in to continue this run</h2>
-        <p>The saved session expired and the site is protected by a CAPTCHA that has to be
-           solved by a person.</p>
-      </div>
-      {% if seconds_left is not none %}
-      <span class="waiting-timer">
-        <span class="mute">gives up in</span>
-        <strong>{{ "%d:%02d" | format(seconds_left // 60, seconds_left % 60) }}</strong>
-      </span>
-      {% endif %}
-    </div>
-    <div class="facts">
-      <div class="fact"><span class="fact-icon" style="color:var(--info)">&#128506;</span>
-        <span><strong>A browser window has opened elsewhere on your screen.</strong>
-        Find it &mdash; it may be behind this one &mdash; and sign in there.</span></div>
-      <div class="fact"><span class="fact-icon" style="color:var(--ok)">&#8634;</span>
-        <span><strong>Once you are in, everything continues on its own.</strong>
-        Nothing further is needed on this page &mdash; leave it open.</span></div>
-      <div class="fact"><span class="fact-icon" style="color:var(--warn)">&#9201;</span>
-        <span>If the wait runs out the run stops and its work is lost. There is no rush,
-        but don&rsquo;t step away.</span></div>
-    </div>
-    {{ ui.phases(phases) }}
-  </section>
-
-{% elif job_running %}
-  <section class="panel run-card">
-    <div class="run-head">
-      <h2 class="run-title">Run in progress &middot; <span class="mono dim">{{ job.current.slug }}</span></h2>
-      <span class="health is-live"><span class="dot"></span>refreshing every 5s</span>
-    </div>
-    <p class="run-sub">Started {{ job.current.started_at | stamp }}{% if elapsed %} &middot; elapsed {{ elapsed }}{% endif %}</p>
-    {{ ui.phases(phases) }}
-    <div class="callout info now">
-      <span class="spinner" aria-hidden="true"></span>
-      {{ job.current.message }}{% if job.current.step and job.current.total %}
-        &mdash; {{ job.current.step }} of {{ job.current.total }} methods{% endif %}
-    </div>
-  </section>
-
-{% else %}
-  {# Shown once, on the load that follows the run ending. A reload stands it down — the
-     run is in the history table below either way. #}
-  {% if finished %}
-    {% set failed = finished.failed or (last_run and last_run.status in ("failed", "blocked")) %}
-    <section class="panel run-card">
-      <div class="run-head">
-        {% if last_run %}{{ ui.outcome_pill(last_run.status) }}
-        {% else %}{{ ui.outcome_pill("failed" if failed else "ok") }}{% endif %}
-        <h2 class="run-title">
-          {{ "Run stopped" if failed else "Run finished" }} &middot;
-          <span class="mono dim">{{ finished.slug }}</span>
-        </h2>
-      </div>
-      <p class="run-sub">
-        {{ "Stopped" if failed else "Completed" }} {{ finished.finished_at | stamp }}{% if elapsed %} &middot; took {{ elapsed }}{% endif %}
-      </p>
-      {# A run that saw less than everything says so here, in one line, whether or not
-         anything was broken. A colour with no explanation is what sent the operator
-         hunting for a fault that was the site's own doing. #}
-      {% set why = (last_run.error if last_run and last_run.error else (finished.message if failed else None)) %}
-      {% if why %}
-      <div class="callout {{ 'warn' if failed or (last_run and last_run.status == 'partial') else 'info' }}">
-        <span class="lead" aria-hidden="true">{{ "&#9888;" | safe if failed else "&#9432;" | safe }}</span>
-        <span>{{ why }}</span>
-      </div>
-      {% endif %}
-      {{ ui.phases(phases) }}
-      {% if last_run %}
-      <div class="tiles">
-        <div class="tile"><div class="tile-n mono">{{ last_run.candidates_found }}</div><div class="tile-k">payees found</div></div>
-        <div class="tile"><div class="tile-n mono" style="{{ 'color:var(--ok)' if last_run.accounts_new }}">{{ last_run.accounts_new }}</div><div class="tile-k">new accounts</div></div>
-        <div class="tile"><div class="tile-n mono">{{ evidence_counts.get(last_run.id, 0) }}</div><div class="tile-k">pages saved</div></div>
-      </div>
-      {% if last_run.candidates_found %}
-        {# Filtered to this run, not the whole list: the question after a run is what *it*
-           brought in, and the answer is uninterpretable next to everything ever collected. #}
-        <a class="btn btn-primary" href="/payees?run={{ last_run.id }}">View what this run collected &rarr;</a>
-      {% endif %}
-      {% endif %}
-      {% if job_log %}<div class="logbox">{% for line in job_log %}{{ line }}
-{% endfor %}</div>{% endif %}
-    </section>
-  {% endif %}
-
-  <form method="post" action="/runs" class="panel start-card" onsubmit="return confirmRun(this)">
-    <h2 class="start-title">Start a collection run</h2>
-    <p class="start-why">Signs in, reads every payment method, saves what it finds &mdash;
-       a couple of minutes, and this page keeps itself up to date.</p>
-    <label class="field-label" for="run-slug">Site</label>
-    <select name="slug" id="run-slug">
-      {% for s in runnable %}
-        <option value="{{ s.slug }}">{{ s.name }}{{ " (draft)" if s.status != "active" }}</option>
-      {% endfor %}
-    </select>
-    <button class="btn-primary btn-lg" type="submit">&#9654; Start run</button>
-  </form>
-{% endif %}
-
-{# The schedule stands apart from the manual card and stays visible in every state: it is
-   a standing arrangement rather than an action, and the one thing you want to find when a
-   run appears that you did not start. #}
+{# The schedule as a card, defined once and placed twice: beside the manual card when
+   nothing is running, and on its own under the progress card when something is. It is a
+   standing arrangement rather than an action, and the first thing you look for when a run
+   appears that you did not start - so it is never off the page. #}
+{% macro schedule_card() %}
 {% if schedule.enabled %}
 <section class="panel sched sched--on">
   <div class="sched-head">
@@ -191,6 +85,128 @@
   </form>
 </section>
 {% endif %}
+{% endmacro %}
+
+{% if waiting %}
+  {# The hardest moment in the whole product: nothing is broken, but nothing continues
+     until a person signs in. Calm blue rather than red, an explicit "not an error", and
+     the three facts that resolve it. #}
+  <section class="waiting">
+    <div class="waiting-head">
+      <span class="waiting-icon" aria-hidden="true">&#8599;</span>
+      <div class="waiting-say">
+        <div class="eyebrow">Waiting for you &middot; not an error</div>
+        <h2>Sign in to continue this run</h2>
+        <p>The saved session expired and the site is protected by a CAPTCHA that has to be
+           solved by a person.</p>
+      </div>
+      {% if seconds_left is not none %}
+      <span class="waiting-timer">
+        <span class="mute">gives up in</span>
+        <strong>{{ "%d:%02d" | format(seconds_left // 60, seconds_left % 60) }}</strong>
+      </span>
+      {% endif %}
+    </div>
+    <div class="facts">
+      <div class="fact"><span class="fact-icon" style="color:var(--info)">&#128506;</span>
+        <span><strong>A browser window has opened elsewhere on your screen.</strong>
+        Find it &mdash; it may be behind this one &mdash; and sign in there.</span></div>
+      <div class="fact"><span class="fact-icon" style="color:var(--ok)">&#8634;</span>
+        <span><strong>Once you are in, everything continues on its own.</strong>
+        Nothing further is needed on this page &mdash; leave it open.</span></div>
+      <div class="fact"><span class="fact-icon" style="color:var(--warn)">&#9201;</span>
+        <span>If the wait runs out the run stops and its work is lost. There is no rush,
+        but don&rsquo;t step away.</span></div>
+    </div>
+    {{ ui.phases(phases) }}
+  </section>
+
+  {# A run in flight takes the full width; the schedule keeps its place underneath. #}
+  {{ schedule_card() }}
+
+{% elif job_running %}
+  <section class="panel run-card">
+    <div class="run-head">
+      <h2 class="run-title">Run in progress &middot; <span class="mono dim">{{ job.current.slug }}</span></h2>
+      <span class="health is-live"><span class="dot"></span>refreshing every 5s</span>
+    </div>
+    <p class="run-sub">Started {{ job.current.started_at | stamp }}{% if elapsed %} &middot; elapsed {{ elapsed }}{% endif %}</p>
+    {{ ui.phases(phases) }}
+    <div class="callout info now">
+      <span class="spinner" aria-hidden="true"></span>
+      {{ job.current.message }}{% if job.current.step and job.current.total %}
+        &mdash; {{ job.current.step }} of {{ job.current.total }} methods{% endif %}
+    </div>
+  </section>
+
+  {{ schedule_card() }}
+
+{% else %}
+  {# Shown once, on the load that follows the run ending. A reload stands it down — the
+     run is in the history table below either way. #}
+  {% if finished %}
+    {% set failed = finished.failed or (last_run and last_run.status in ("failed", "blocked")) %}
+    <section class="panel run-card">
+      <div class="run-head">
+        {% if last_run %}{{ ui.outcome_pill(last_run.status) }}
+        {% else %}{{ ui.outcome_pill("failed" if failed else "ok") }}{% endif %}
+        <h2 class="run-title">
+          {{ "Run stopped" if failed else "Run finished" }} &middot;
+          <span class="mono dim">{{ finished.slug }}</span>
+        </h2>
+      </div>
+      <p class="run-sub">
+        {{ "Stopped" if failed else "Completed" }} {{ finished.finished_at | stamp }}{% if elapsed %} &middot; took {{ elapsed }}{% endif %}
+      </p>
+      {# A run that saw less than everything says so here, in one line, whether or not
+         anything was broken. A colour with no explanation is what sent the operator
+         hunting for a fault that was the site's own doing. #}
+      {% set why = (last_run.error if last_run and last_run.error else (finished.message if failed else None)) %}
+      {% if why %}
+      <div class="callout {{ 'warn' if failed or (last_run and last_run.status == 'partial') else 'info' }}">
+        <span class="lead" aria-hidden="true">{{ "&#9888;" | safe if failed else "&#9432;" | safe }}</span>
+        <span>{{ why }}</span>
+      </div>
+      {% endif %}
+      {{ ui.phases(phases) }}
+      {% if last_run %}
+      <div class="tiles">
+        <div class="tile"><div class="tile-n mono">{{ last_run.candidates_found }}</div><div class="tile-k">payees found</div></div>
+        <div class="tile"><div class="tile-n mono" style="{{ 'color:var(--ok)' if last_run.accounts_new }}">{{ last_run.accounts_new }}</div><div class="tile-k">new accounts</div></div>
+        <div class="tile"><div class="tile-n mono">{{ evidence_counts.get(last_run.id, 0) }}</div><div class="tile-k">pages saved</div></div>
+      </div>
+      {% if last_run.candidates_found %}
+        {# Filtered to this run, not the whole list: the question after a run is what *it*
+           brought in, and the answer is uninterpretable next to everything ever collected. #}
+        <a class="btn btn-primary" href="/payees?run={{ last_run.id }}">View what this run collected &rarr;</a>
+      {% endif %}
+      {% endif %}
+      {% if job_log %}<div class="logbox">{% for line in job_log %}{{ line }}
+{% endfor %}</div>{% endif %}
+    </section>
+  {% endif %}
+
+  {# Once by hand, or on a timer: the two ways to collect, offered as a pair rather than
+     one above the other. Equal columns because neither is the lesser choice. #}
+  <div class="two-up">
+    <form method="post" action="/runs" class="panel start-card" onsubmit="return confirmRun(this)">
+      <h2 class="start-title">Start a collection run</h2>
+      <p class="start-why">Signs in, reads every payment method, saves what it finds &mdash;
+         a couple of minutes, and this page keeps itself up to date.</p>
+      <div class="field">
+        <label class="field-label" for="run-slug">Site</label>
+        <select name="slug" id="run-slug">
+          {% for s in runnable %}
+            <option value="{{ s.slug }}">{{ s.name }}{{ " (draft)" if s.status != "active" }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <button class="btn-primary btn-lg" type="submit">&#9654; Start run</button>
+    </form>
+
+    {{ schedule_card() }}
+  </div>
+{% endif %}
 
 <section class="panel" style="margin-top:20px">
   <h2>Run history</h2>
@@ -233,12 +249,24 @@
   .tile-n { font-size:22px; font-weight:750; }
   .tile-k { font-size:12px; color:var(--text-3); }
 
-  .start-card { padding:24px; max-width:640px; display:block; }
+  /* The two ways to collect, side by side and the same size. Neither is the lesser
+     choice, so neither gets the wider column or the higher position. */
+  .two-up { display:grid; grid-template-columns:1fr 1fr; gap:16px; align-items:stretch;
+            margin-bottom:20px; }
+  @media (max-width:1080px) { .two-up { grid-template-columns:1fr; } }
+  .two-up > * { max-width:none; margin-bottom:0; height:100%; display:flex;
+                flex-direction:column; }
+  /* The cards match in height, but their buttons follow their own content rather than
+     being pushed to a shared baseline: the shorter card would otherwise show a hole
+     between its last field and a button floating at the bottom. */
+  .two-up > * > button[type="submit"] { align-self:flex-start; }
+
+  .start-card { padding:24px; }
   .start-title { margin:0 0 6px; font-size:16px; font-weight:700; }
-  .start-why { margin:0 0 18px; color:var(--text-2); font-size:13px; }
+  .start-why { margin:0 0 20px; color:var(--text-2); font-size:13px; max-width:60ch; }
   .field-label { display:block; font-size:12px; font-weight:600; color:var(--text-2);
                  margin-bottom:6px; }
-  .start-card select { width:100%; background:var(--surface-2); margin-bottom:14px; }
+  .start-card select, .sched .field select { width:100%; background:var(--surface-2); }
   .start-card .callout { margin-bottom:18px; }
 
   /* waiting for sign-in */
@@ -268,6 +296,7 @@
   .note { white-space:normal; min-width:260px; max-width:420px; font-size:12.5px; }
   /* ---- schedule ---- */
   .sched { max-width:760px; margin-bottom:20px; padding:22px 24px; }
+  .two-up .sched-form { flex:1; }
   .sched--on { border-color:var(--accent); }
   .sched-title { margin:0 0 6px; font-size:16px; font-weight:700; }
   .sched-why { margin:0 0 20px; color:var(--text-2); font-size:13px; max-width:60ch; }
