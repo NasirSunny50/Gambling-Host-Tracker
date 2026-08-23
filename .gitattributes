@@ -1,0 +1,3 @@
+# PDFs are binary: without this git rewrites their line endings on checkout and
+# corrupts them on Windows.
+*.pdf binary
