@@ -50,6 +50,18 @@ For JavaScript-rendered sites, add the browser fetcher:
 1. **Recon first.** Open the deposit page and note where each number sits, what labels it,
    and whether it is rendered server-side or by JavaScript. Save the page into
    `tests/fixtures/html/` — that fixture is what keeps the extractor honest later.
+
+   For a login-gated site whose panel is built in JavaScript, `ght recon` does this
+   through the same sign-in and the same panel a run uses:
+
+   ```bash
+   ght recon --site <slug>                     # every method on offer, with its id
+   ght recon --site <slug> --open <method-id>  # one method's panel, element by element
+   ght recon --site <slug> --out page.html     # keep the capture as a fixture
+   ```
+
+   It opens a method and never clicks further: on these panels the next click is the
+   confirm, which raises a real deposit request on the operator.
 2. Copy `tests/fixtures/demo-site.yaml` to `sources/<slug>.yaml` and fill in the URLs and
    blocks.
    Each block pairs a channel with the element holding its number:
@@ -80,6 +92,7 @@ ght run                                # collect from every active site
 ght accounts --all --channel bkash     # what has been collected
 ght status                             # recent runs and their outcomes
 ght export --out accounts.csv          # CSV for the AML team (logged in access_log)
+ght recon --site 1xbet-bd              # what the site is offering right now, and its ids
 ght verify-evidence                    # re-hash stored blobs against their recorded digest
 ght serve                              # read-only web portal over the collected data
 ```

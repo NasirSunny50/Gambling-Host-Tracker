@@ -248,6 +248,100 @@ def verify_evidence(
     console.print(f"[{colour}]{checked - failed}/{checked} blobs verified[/{colour}]")
 
 
+def _text_of(node) -> str:
+    return " ".join(node.text(separator=" ", strip=True).split())
+
+
+@app.command("recon")
+def recon(
+    site: str = typer.Option(..., "--site", "-s", help="Slug of the source to look at."),
+    open_method: str | None = typer.Option(
+        None, "--open", help="Open one method by its data-method id and describe its panel."
+    ),
+    out: Path | None = typer.Option(None, "--out", help="Write the captured HTML here."),
+) -> None:
+    """List the payment methods a site is offering right now, and what its panel holds.
+
+    The step README calls "recon first" - open the deposit page, see what is there, and
+    write the selectors from what you saw rather than from what the last brand did. It
+    signs in the same way a run does and reads the same panel, so what it prints is what
+    the collector would be pointed at.
+
+    It clicks a method open when asked and never anything further: on this engine the click
+    *after* that one is the confirm, which raises a real deposit request on the operator.
+    """
+    from selectolax.parser import HTMLParser
+
+    from ght.auth_login import perform_login
+    from ght.fetchers import get_fetcher
+    from ght.sources import Step
+
+    config = load_source(site)
+    if config.login is not None:
+        result = perform_login(config)
+        if not result.ok:
+            console.print(f"[red]not signed in[/red]: {result.detail or result.reason}")
+            raise typer.Exit(1)
+        console.print(f"[green]signed in[/green] {result.detail or ''}")
+
+    flow = []
+    wait_for = config.wait_for
+    if open_method:
+        flow = [Step(click=f'.payment-cell[data-method="{open_method}"]', wait_for=None)]
+        wait_for = None  # whatever the modal turns out to be called is what we are here to find
+
+    fetcher = get_fetcher(
+        "browser",
+        flow=flow,
+        wait_for=wait_for,
+        auth_state=config.auth_state,
+        channel=config.browser_channel,
+        frame=config.frame,
+        timeout=config.timeout or settings.request_timeout,
+        flow_timeout=config.flow_timeout,
+    )
+    capture = fetcher.fetch(config.current_urls[0])
+    if not capture.ok:
+        console.print(f"[red]fetch failed[/red]: {capture.error}")
+        raise typer.Exit(1)
+    if capture.flow_error:
+        console.print(f"[yellow]flow: {capture.flow_error}[/yellow]")
+    console.print(f"landed on [cyan]{capture.url}[/cyan]")
+
+    if out:
+        out.write_text(capture.html or "", encoding="utf-8")
+        console.print(f"html written to {out}")
+
+    tree = HTMLParser(capture.html or "")
+
+    cells = tree.css("[data-method]")
+    if cells:
+        table = Table("data-method", "label", title=f"{len(cells)} methods offered")
+        for cell in cells:
+            table.add_row(cell.attributes.get("data-method") or "", _text_of(cell)[:60])
+        console.print(table)
+
+    # Dropdowns are why a bank-transfer method shows nothing until one is set, and their
+    # option labels are the site's own wording - which drifts, and has to be copied exactly.
+    for select_node in tree.css("select"):
+        options = [_text_of(o) for o in select_node.css("option") if _text_of(o)]
+        if options:
+            name = select_node.attributes.get("name") or select_node.attributes.get("id") or "select"
+            console.print(f"[bold]{name}[/bold]: " + " | ".join(options))
+
+    if open_method:
+        # Everything in the opened panel that carries text, so the element holding the
+        # payee can be picked out and written into a block.
+        console.print(f"\n[bold]panel for {open_method}[/bold]")
+        for node in tree.css(".modal-payment, .payment_modal_row, .payment_modal_body"):
+            for child in node.css("*"):
+                text = _text_of(child)
+                if not text or len(text) > 120 or child.css("*"):
+                    continue
+                classes = (child.attributes.get("class") or "").strip()
+                console.print(f"  {child.tag}.{classes or '-'} :: {text}")
+
+
 @app.command("status")
 def status(limit: int = typer.Option(15, "--limit", "-n")) -> None:
     """Show the most recent collection runs."""
