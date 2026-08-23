@@ -7,8 +7,13 @@ from dataclasses import dataclass, field
 from ght.extractors.css import extract_with_selectors
 from ght.extractors.regex_sweep import REGEX_SWEEP_ORIGIN, sweep
 from ght.normalize.bank import find_bank_accounts, holder_name_in
-from ght.normalize.channel import CHANNEL_BANK, classify_account_type, classify_channel
-from ght.normalize.msisdn import find_msisdns, normalize_msisdn, operator_of
+from ght.normalize.channel import (
+    CHANNEL_BANK,
+    CHANNEL_ROCKET,
+    classify_account_type,
+    classify_channel,
+)
+from ght.normalize.msisdn import find_msisdns, normalize_msisdn, normalize_rocket, operator_of
 from ght.sources import SourceConfig
 from ght.types import (
     CONFIDENCE_HIGH,
@@ -61,11 +66,20 @@ def _normalize_candidate(candidate: Candidate, ignored: set[str]) -> NormalizedA
 
     # A mobile number is the common case; try that first.
     msisdns = find_msisdns(candidate.raw_text)
+    channel_here = candidate.channel_hint or classify_channel(candidate.context)
+    if not msisdns and channel_here == CHANNEL_ROCKET:
+        # Rocket alone publishes twelve digits - the wallet's mobile number plus a check
+        # digit - which the MSISDN pattern refuses on purpose, since biting eleven digits
+        # out of a longer run is how a bank account becomes a phone number. Only a block
+        # that says it is Rocket may read it that way.
+        rocket = normalize_rocket(candidate.raw_text)
+        if rocket:
+            msisdns = [rocket]
     if msisdns:
         number = msisdns[0]
         if number in ignored:
             return None
-        channel = candidate.channel_hint or classify_channel(candidate.context)
+        channel = channel_here
         if channel is None or channel == CHANNEL_BANK:
             # An MFS wallet with no brand near it cannot be attributed, and a mobile
             # number sitting inside a bank-transfer block is a helpline, not a wallet.

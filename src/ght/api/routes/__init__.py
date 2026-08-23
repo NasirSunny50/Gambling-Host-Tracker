@@ -53,6 +53,8 @@ CHANNEL_LABELS = {
     "upay": "Upay",
     "tap": "Tap",
     "mcash": "mCash",
+    "cellfin": "CellFin",
+    "ipay": "iPay",
     "bank_transfer": "Bank transfer",
 }
 

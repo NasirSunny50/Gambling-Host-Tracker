@@ -1,13 +1,13 @@
-# Melbet Bangladesh. Same platform as 1xbet-bd - the login form, the embedded payment
-# panel and the modal markup are the same engine - so this config starts from that one and
-# is corrected against live recon rather than assumed to match.
+# Melbet Bangladesh. Same platform as 1xbet-bd - the login form, the embedded payment panel
+# and the modal markup are the same engine - but every selector here was read off this
+# site's own panel while signed in, because "the same engine" is a reason to look, not a
+# reason to assume.
 #
-# PAUSED until the per-method probes below are filled in from a signed-in recon. The engine
-# names each method by a `data-method` id that differs per brand, and guessing them would
-# produce a config that collects nothing while reporting that its selectors are stale.
+# Nine of the twelve methods the operator asked for are collected. The three that are not,
+# and why, are written against the probe list below.
 slug: melbet-bd
 name: Melbet Bangladesh
-status: paused
+status: active
 fetcher: browser
 
 urls:
@@ -41,8 +41,8 @@ login:
   assisted: true
 
 # The payment panel is a separate app embedded in the account page; the flow clicks and the
-# block selectors all run inside it. To be confirmed on the first signed-in recon - the
-# 1xBet frame path is /paysystems/deposit and this brand is expected to match.
+# block selectors all run inside it. Confirmed on the live panel: same path as the other
+# brand.
 frame: /paysystems/deposit
 
 # The account page loads its payment panel in an iframe that routinely takes >30s, while a
@@ -68,22 +68,133 @@ reset:
 # /en/user/login?return-url=... , so the URL is the reliable expiry signal here.
 logged_out_url: /user/login
 
-# Probes go here, one per method, once the recon has the real `data-method` ids. The
-# methods to collect, as listed by the operator:
+# One probe per method. Every selector below was read off the live panel on 2026-08-23,
+# not carried over from the other brand: each method prints its receiving wallet in
+# `.modal-message-address` inside `.payment_modal_row`, which is the same element 1xBet
+# uses for some of its methods and not for others - so it was worth checking.
+probes:
+  - name: cellfin-free
+    flow:
+      - click: '.payment-cell[data-method="cellfin_free_bt_8"]'
+        wait_for: ".modal-payment.active .modal-message-address"
+    wait_for: ".modal-payment.active .modal-message-address"
+    blocks:
+      - channel: cellfin
+        container: ".modal-payment.active .payment_modal_row"
+        value: ".modal-message-address"
+
+  - name: nagad
+    flow:
+      - click: '.payment-cell[data-method="tarak_nagad"]'
+        wait_for: ".modal-payment.active .modal-message-address"
+    wait_for: ".modal-payment.active .modal-message-address"
+    blocks:
+      - channel: nagad
+        container: ".modal-payment.active .payment_modal_row"
+        value: ".modal-message-address"
+
+  - name: rocket
+    flow:
+      - click: '.payment-cell[data-method="rocket_melbet"]'
+        wait_for: ".modal-payment.active .modal-message-address"
+    wait_for: ".modal-payment.active .modal-message-address"
+    blocks:
+      # Rocket publishes twelve digits - the wallet's mobile number with a check digit on
+      # the end. The extractor keys it on the mobile and the observation keeps the printed
+      # string, so what is stored matches what a payer would be told to send to.
+      - channel: rocket
+        container: ".modal-payment.active .payment_modal_row"
+        value: ".modal-message-address"
+
+  - name: upay
+    flow:
+      - click: '.payment-cell[data-method="upay_melbet"]'
+        wait_for: ".modal-payment.active .modal-message-address"
+    wait_for: ".modal-payment.active .modal-message-address"
+    blocks:
+      - channel: upay
+        container: ".modal-payment.active .payment_modal_row"
+        value: ".modal-message-address"
+
+  - name: nagad-free
+    flow:
+      - click: '.payment-cell[data-method="nagad_merchant_bangladesh_melbet"]'
+        wait_for: ".modal-payment.active .modal-message-address"
+    wait_for: ".modal-payment.active .modal-message-address"
+    blocks:
+      # This one names the business as well as the number, each in its own copyable
+      # element - the only method here that hands over both.
+      - channel: nagad
+        container: ".modal-payment.active .payment_modal_body"
+        value: ".payment_modal_row:nth-of-type(2) .modal-message-address"
+        holder: ".payment_modal_row:nth-of-type(3) .modal-message-address"
+
+  - name: trust-axiata-pay
+    flow:
+      - click: '.payment-cell[data-method="tap_melbet"]'
+        wait_for: ".modal-payment.active .modal-message-address"
+    wait_for: ".modal-payment.active .modal-message-address"
+    blocks:
+      - channel: tap
+        container: ".modal-payment.active .payment_modal_row"
+        value: ".modal-message-address"
+
+  - name: rocket-free
+    flow:
+      - click: '.payment-cell[data-method="rocket_merchant_melbet"]'
+        wait_for: ".modal-payment.active .modal-message-address"
+    wait_for: ".modal-payment.active .modal-message-address"
+    blocks:
+      # Eleven digits here, unlike the Rocket method above: this is the merchant payment
+      # number rather than a Rocket wallet.
+      - channel: rocket
+        container: ".modal-payment.active .payment_modal_row"
+        value: ".modal-message-address"
+
+  - name: ipay
+    flow:
+      - click: '.payment-cell[data-method="ipay_bdt_bt_8"]'
+        wait_for: ".modal-payment.active .modal-message-address"
+    wait_for: ".modal-payment.active .modal-message-address"
+    blocks:
+      - channel: ipay
+        container: ".modal-payment.active .payment_modal_row"
+        value: ".modal-message-address"
+
+  - name: nexus-pay
+    flow:
+      - click: '.payment-cell[data-method="nexuspay_bt_melbet"]'
+        wait_for: ".modal-payment.active .modal-message-address"
+    wait_for: ".modal-payment.active .modal-message-address"
+    blocks:
+      # Nexus Pay is Dutch-Bangla Bank's own wallet, so the thirteen digits are a wallet id
+      # rather than a bank account number - but the bank is what an investigator needs, and
+      # the page never writes it beside the number.
+      - channel: bank_transfer
+        container: ".modal-payment.active .payment_modal_row"
+        value: ".modal-message-address"
+        bank_name: "Dutch-Bangla Bank"
+
+# Still to add, both blocked on a live check the site kept cutting short:
 #
-#   E-wallets        CellFin Free, Nagad, Rocket, Nagad by Paykassma, uPay, Nagad Free,
-#                    Trust Axiata Pay, Rocket Free, iPay
-#   Internet banking NexusPay
-#   Bank transfer    CellFin, and Bank Transfer - which reveals nothing until a recipient
-#                    bank is chosen, so it needs one probe per option in its dropdown,
-#                    each with `bank_name` set from the option (the page never writes the
-#                    bank beside the number).
+#   cellfin_bt_melbet (Bank transfer > Cellfin) - the cell would not open on the shared
+#     panel and no modal appeared. Needs a visit of its own to see whether it is switched
+#     off, in a section that has to be opened first, or simply slower than the others.
 #
-# "Nagad by Paykassma" is the paykassma aggregator: reaching its payee means confirming a
-# deposit, which raises a real - unpaid - deposit request on the operator every run, and
-# what it yields is a rotating merchant name rather than a receiving wallet. It must be
-# marked `creates_order: true`, and the operator asked before any run that includes it.
-probes: []
+#   melbet_bt_bangla (Bank transfer) - the modal opens with a bank dropdown and nothing
+#     else. `select[name="bank"]` offered exactly, on 2026-08-23:
+#       "Select recipient's bank" | "1.UCB Bank" | "2. Pubali Bank." | "DUTCH BANGLA BANK,"
+#       | "Islami Bank"
+#     Those labels are the site's own wording, numbering and stray punctuation included,
+#     and have to be copied exactly. One probe per bank, each with bank_name set from the
+#     option. What the modal shows once a bank is chosen has not been seen yet - there is a
+#     #btn_next button in it, which may or may not be needed before the details appear.
+#
+#   nagad_melbet_p2c (Nagad by Paykassma) - same non-opening cell as cellfin_bt. Its flow
+#     is known from the operator: type 200 into the amount, press Next, and the payee is
+#     the merchant name on the Nagad checkout the browser lands on. Confirming a deposit is
+#     what gets there, so this probe raises a real - unpaid - deposit request every run and
+#     must carry `creates_order: true`.
 
 ignore_numbers: []
 

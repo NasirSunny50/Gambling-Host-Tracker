@@ -91,6 +91,44 @@ def find_msisdns(text: str) -> list[str]:
     return found
 
 
+# Rocket (Dutch-Bangla) writes a wallet as the holder's mobile number with a check digit
+# on the end - twelve digits where every other MFS shows eleven. The mobile is the
+# identity: the twelfth is derived from it, so two Rocket wallets cannot differ only there.
+_ROCKET_PATTERN = re.compile(
+    r"""(?<![0-9])
+        (?:\+?88[\s\-.]?)?
+        0?1[3-9]
+        (?:[\s\-.]?\d){9}   # one more than a plain MSISDN: the check digit
+        (?![0-9])
+    """,
+    re.VERBOSE,
+)
+
+
+def normalize_rocket(raw: str) -> str | None:
+    """The mobile number inside a 12-digit Rocket wallet, or ``None`` if it is not one.
+
+    Returns the same ``+8801XXXXXXXXX`` form every other channel is keyed on, so a Rocket
+    wallet de-duplicates against itself across runs and sites. The check digit is not
+    thrown away - the observation keeps the published string verbatim in ``raw_text``,
+    which is what the evidence has to show.
+    """
+    if not raw:
+        return None
+    match = _ROCKET_PATTERN.search(translate_digits(raw))
+    if not match:
+        return None
+    digits = re.sub(r"\D", "", match.group(0))
+    # Strip a country code before counting: +8801XXXXXXXXXC is the same wallet.
+    if digits.startswith("880"):
+        digits = "0" + digits[3:]
+    elif digits.startswith("88"):
+        digits = "0" + digits[2:]
+    if len(digits) != 12:
+        return None
+    return normalize_msisdn(digits[:11])
+
+
 def operator_of(msisdn: str) -> str | None:
     """Map a normalized MSISDN to its mobile operator, or ``None`` if unrecognised."""
     normalized = normalize_msisdn(msisdn)

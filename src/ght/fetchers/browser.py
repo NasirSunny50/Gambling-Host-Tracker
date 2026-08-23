@@ -172,6 +172,13 @@ class BrowserFetcher:
                     page.select_option(
                         step.select, label=step.option, force=True, timeout=self.flow_timeout
                     )
+                elif step.fill:
+                    # Typed rather than assigned: these forms enable the next button from
+                    # the input's own key events, and a value set straight onto the element
+                    # leaves the button disabled and the step reported as a broken selector.
+                    page.click(step.fill, timeout=self.flow_timeout)
+                    page.fill(step.fill, "", timeout=self.flow_timeout)
+                    page.type(step.fill, step.value, delay=40, timeout=self.flow_timeout)
                 else:
                     page.click(step.click, timeout=self.flow_timeout)
                 if step.wait_for:

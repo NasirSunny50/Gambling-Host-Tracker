@@ -2,14 +2,15 @@
 
 {% set CHANNEL_LABELS = {
   "bkash":"bKash", "nagad":"Nagad", "rocket":"Rocket", "upay":"Upay",
-  "tap":"Tap", "mcash":"mCash", "bank_transfer":"Bank transfer"
+  "tap":"Tap", "mcash":"mCash", "cellfin":"CellFin", "ipay":"iPay",
+  "bank_transfer":"Bank transfer"
 } %}
 
 {# A short mark per channel. The two-letter form is legible at 10px where a wordmark is
    not, and it carries the channel's own colour so a scan down the column groups by eye. #}
 {% set CHANNEL_MARKS = {
   "bkash":"bK", "nagad":"Ng", "rocket":"Rk", "upay":"Up",
-  "tap":"Tp", "mcash":"mC", "bank_transfer":"BT"
+  "tap":"Tp", "mcash":"mC", "cellfin":"Cf", "ipay":"iP", "bank_transfer":"BT"
 } %}
 
 {% macro channel(value) -%}

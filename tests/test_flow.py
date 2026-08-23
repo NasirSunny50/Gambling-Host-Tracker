@@ -619,6 +619,57 @@ def test_a_present_option_is_selected():
     assert page.selected == ["IFIC"]
 
 
+class FillPage(FakePage):
+    """A form that only enables its button once something has been typed into it."""
+
+    def __init__(self):
+        super().__init__()
+        self.typed: list[tuple[str, str]] = []
+        self.cleared: list[str] = []
+
+    def fill(self, selector, value, timeout=None):
+        self.cleared.append(selector)
+
+    def type(self, selector, text, delay=None, timeout=None):
+        self.typed.append((selector, text))
+
+
+def test_an_amount_is_typed_rather_than_assigned():
+    """These forms enable the next button from the input's own key events. A value set
+    straight onto the element leaves the button disabled, and the step that follows is then
+    reported as a selector that no longer matches - which sends someone to fix the wrong
+    thing entirely."""
+    fetcher = BrowserFetcher(flow=[Step(fill="#amount", value="200", wait_for=".next")])
+    page = FillPage()
+
+    assert fetcher._walk(page) is None
+    assert page.typed == [("#amount", "200")]
+    # Cleared first: a prefilled default would otherwise leave "500200" in the box.
+    assert page.cleared == ["#amount"]
+
+
+def test_a_step_does_exactly_one_thing():
+    for kwargs in (
+        {},  # nothing at all
+        {"click": ".a", "fill": "#b", "value": "1"},
+        {"click": ".a", "select": "#b", "option": "x"},
+    ):
+        with pytest.raises(ValidationError):
+            Step(**kwargs)
+
+
+def test_a_fill_without_a_value_is_a_config_error_not_an_empty_box():
+    with pytest.raises(ValidationError) as caught:
+        Step(fill="#amount")
+    assert "value" in str(caught.value)
+
+
+def test_an_amount_of_zero_is_a_value_like_any_other():
+    """`value` is checked for being absent, not for being falsy - "0" is a thing a site
+    might legitimately want typed, and `if not value` would reject it."""
+    assert Step(fill="#amount", value="0").value == "0"
+
+
 # ------------------------------------------- capturing after the flow leaves the frame
 
 

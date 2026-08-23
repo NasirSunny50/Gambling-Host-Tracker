@@ -86,11 +86,17 @@ class Step(_Strict):
     """
 
     # Exactly one of these. Some payee details only appear once a dropdown is set - a
-    # bank transfer panel shows nothing at all until a recipient bank is chosen.
+    # bank transfer panel shows nothing at all until a recipient bank is chosen - and some
+    # only once an amount has been typed, because the button that reveals them stays
+    # disabled until the form validates.
     click: str | None = None
     select: str | None = None
-    # The option label to choose, when this step is a select.
+    fill: str | None = None
+    # The option label to choose, when this step is a select; the text to type, when it is
+    # a fill. An amount belongs in config rather than in code: it is a property of what the
+    # site will accept, and the smallest one it accepts is the one to send.
     option: str | None = None
+    value: str | None = None
     # Selector to wait for afterwards, so the next step acts on a rendered page.
     wait_for: str | None = None
     # A step that may legitimately be absent (an interstitial that only shows sometimes).
@@ -98,16 +104,19 @@ class Step(_Strict):
 
     @model_validator(mode="after")
     def _one_action(self) -> Step:
-        if bool(self.click) == bool(self.select):
-            raise ValueError("a step needs exactly one of click or select")
+        actions = [bool(self.click), bool(self.select), bool(self.fill)]
+        if sum(actions) != 1:
+            raise ValueError("a step needs exactly one of click, select or fill")
         if self.select and not self.option:
             raise ValueError(f"select {self.select!r} needs an option to choose")
+        if self.fill and self.value is None:
+            raise ValueError(f"fill {self.fill!r} needs a value to type")
         return self
 
     @property
     def target(self) -> str:
         """The selector this step acts on, whichever kind of step it is."""
-        return self.click or self.select or ""
+        return self.click or self.select or self.fill or ""
 
 
 class Probe(_Strict):

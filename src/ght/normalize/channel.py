@@ -15,6 +15,11 @@ CHANNEL_ROCKET = "rocket"
 CHANNEL_UPAY = "upay"
 CHANNEL_TAP = "tap"
 CHANNEL_MCASH = "mcash"
+# Two more wallets these sites collect through. CellFin is Islami Bank's app and iPay its
+# own scheme; both publish an ordinary mobile number as the receiving wallet, so they
+# behave exactly like the others here and only needed naming.
+CHANNEL_CELLFIN = "cellfin"
+CHANNEL_IPAY = "ipay"
 CHANNEL_BANK = "bank_transfer"
 
 # Ordered most-specific first: a block mentioning both "bKash" and "bank" is a bKash block.
@@ -27,11 +32,24 @@ _CHANNEL_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     (CHANNEL_UPAY, re.compile(r"\bupay\b|উপায়", re.IGNORECASE)),
     (CHANNEL_TAP, re.compile(r"\btap\b(?!\s+(?:here|to|on))|ট্যাপ", re.IGNORECASE)),
     (CHANNEL_MCASH, re.compile(r"\bm[\s\-]?cash\b", re.IGNORECASE)),
+    (CHANNEL_CELLFIN, re.compile(r"\bcell[\s\-]?fin\b|সেলফিন", re.IGNORECASE)),
+    # Case-sensitive on the brand's own capital P: "ipay" sits inside enough ordinary
+    # words that a loose match would claim numbers belonging to a neighbouring block.
+    (CHANNEL_IPAY, re.compile(r"\bi[\s\-]?Pay\b|আইপে")),
     (CHANNEL_BANK, re.compile(r"\bbank\b|ব্যাংক|\ba/?c\s*(?:no|number)|\brouting\b", re.IGNORECASE)),
 ]
 
 MFS_CHANNELS = frozenset(
-    {CHANNEL_BKASH, CHANNEL_NAGAD, CHANNEL_ROCKET, CHANNEL_UPAY, CHANNEL_TAP, CHANNEL_MCASH}
+    {
+        CHANNEL_BKASH,
+        CHANNEL_NAGAD,
+        CHANNEL_ROCKET,
+        CHANNEL_UPAY,
+        CHANNEL_TAP,
+        CHANNEL_MCASH,
+        CHANNEL_CELLFIN,
+        CHANNEL_IPAY,
+    }
 )
 ALL_CHANNELS = MFS_CHANNELS | {CHANNEL_BANK}
 
