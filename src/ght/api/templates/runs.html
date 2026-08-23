@@ -230,6 +230,7 @@
     </td></tr>
     {% endfor %}
   {% endcall %}
+  {% if p.total %}{{ ui.pager(p, "/runs", {"per": per}, page_sizes=page_sizes, per=per, noun="runs") }}{% endif %}
 </section>
 
 <style>

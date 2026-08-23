@@ -701,10 +701,23 @@ def _elapsed(info) -> str:
 
 
 @router.get("/runs", response_class=HTMLResponse)
-def runs(request: Request, session: Session = Depends(get_session)):
-    rows = session.scalars(
-        select(CollectionRun).order_by(CollectionRun.started_at.desc()).limit(100)
-    ).all()
+def runs(
+    request: Request,
+    page: int = 1,
+    per: int = PAGE_SIZE,
+    session: Session = Depends(get_session),
+):
+    # The history is paged like every other list rather than cut off at a hundred. A
+    # truncated table answers "what happened lately" and quietly refuses "what happened on
+    # the 3rd" - and this is the table an operator goes back through when a number needs a
+    # date attached to it.
+    per_page = per if per in PAGE_SIZES else PAGE_SIZE
+    rows, run_page = _paginate(
+        session,
+        select(CollectionRun).order_by(CollectionRun.started_at.desc()),
+        page,
+        per_page=per_page,
+    )
     sites = {s.id: s for s in session.scalars(select(Site))}
     counts = dict(
         session.execute(select(Evidence.run_id, func.count()).group_by(Evidence.run_id)).all()
@@ -725,11 +738,17 @@ def runs(request: Request, session: Session = Depends(get_session)):
     if waiting:
         phases = [{**p, "state": "waiting" if p["state"] == "active" else p["state"]} for p in phases]
 
-    # The run row the finished summary describes: the newest one for that site.
+    # The run row the finished summary describes: the newest one for that site. Read from
+    # the database rather than from the rows on screen - the history is paged now, and an
+    # operator reading page three has just as much right to the card as one on page one.
     last_run = None
     if finished:
-        last_run = next(
-            (r for r in rows if r.site_id in sites and sites[r.site_id].slug == finished.slug), None
+        last_run = session.scalar(
+            select(CollectionRun)
+            .join(Site, Site.id == CollectionRun.site_id)
+            .where(Site.slug == finished.slug)
+            .order_by(CollectionRun.started_at.desc())
+            .limit(1)
         )
 
     return templates.TemplateResponse(
@@ -738,6 +757,9 @@ def runs(request: Request, session: Session = Depends(get_session)):
         {
             "nav": _nav(session),
             "rows": rows,
+            "p": run_page,
+            "per": per_page,
+            "page_sizes": PAGE_SIZES,
             "sites": sites,
             "evidence_counts": counts,
             "runnable": _runnable_sites(),

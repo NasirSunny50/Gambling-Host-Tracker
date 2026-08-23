@@ -13,11 +13,22 @@
     <section class="panel">
       <div class="ident">
         <div class="ident-ch">{{ ui.channel(account.channel) }}</div>
-        <div class="ident-num mono">{{ account.account_number }}</div>
+        {# The copy sits on the number, not in a button further down the page. What the
+           reader came for is a value they are about to paste into a blocklist, and the
+           control that hands it over belongs against the value itself. #}
+        <div class="ident-num mono">
+          <span>{{ account.account_number }}</span>
+          <button class="copy copy-lg" type="button" title="Copy account number"
+                  data-copy="{{ account.account_number }}">{{ ui.copy_icon() }}</button>
+        </div>
         <div class="ident-state">{{ ui.account_state(account) }}</div>
       </div>
       <dl class="kv">
-        <div class="row"><dt>Holder name</dt><dd>{{ account.holder_name or ui.unknown() }}</dd></div>
+        {# The name is retyped into a case file as often as the number is - and it is the
+           half more likely to be got wrong by hand. #}
+        <div class="row"><dt>Holder name</dt>
+          <dd>{% if account.holder_name %}{{ ui.copyable(account.holder_name) }}
+              {%- else %}{{ ui.unknown() }}{% endif %}</dd></div>
         <div class="row"><dt>Bank</dt><dd>{{ account.bank_name or ui.unknown() }}</dd></div>
         <div class="row"><dt>Branch</dt><dd>{{ account.branch or ui.unknown() }}</dd></div>
         <div class="row"><dt>Operator</dt><dd>{{ account.operator or ui.unknown() }}</dd></div>
@@ -27,9 +38,6 @@
         <div class="row"><dt>Times seen</dt><dd class="mono">{{ account.observation_count }}</dd></div>
       </dl>
     </section>
-
-    <button class="btn copy-wide" type="button"
-            data-copy="{{ account.account_number }}">{{ ui.copy_icon() }} Copy account number</button>
 
     <section class="panel">
       <h2>Seen on {{ sites | length }} site{{ "" if sites | length == 1 else "s" }}</h2>
@@ -47,6 +55,21 @@
       {% else %}
       <div class="quiet-empty">Not linked to any site yet.</div>
       {% endfor %}
+    </section>
+
+    <section class="panel">
+      <h2>Sightings &mdash; {{ observations | length }}</h2>
+      {% call ui.table(["When", "#Run", "Raw text"]) %}
+        {% for o in observations %}
+        <tr>
+          <td class="dim mono nowrap">{{ o.observed_at | stamp }}</td>
+          <td class="num mono">#{{ o.run_id }}</td>
+          <td class="mono"><span class="clip" title="{{ o.raw_text }}">{{ o.raw_text[:70] }}</span></td>
+        </tr>
+        {% else %}
+        <tr><td colspan="3"><div class="quiet-empty">No sightings recorded.</div></td></tr>
+        {% endfor %}
+      {% endcall %}
     </section>
   </div>
 
@@ -71,22 +94,6 @@
         <div class="quiet-empty">No screenshot was captured on the runs that saw this account.</div>
       {% endif %}
     </section>
-
-    <section class="panel">
-      <h2>Sightings &mdash; {{ observations | length }}</h2>
-      {% call ui.table(["When", "#Run", "Raw text", "Origin"]) %}
-        {% for o in observations %}
-        <tr>
-          <td class="dim mono nowrap">{{ o.observed_at | stamp }}</td>
-          <td class="num mono">#{{ o.run_id }}</td>
-          <td class="mono"><span class="clip" title="{{ o.raw_text }}">{{ o.raw_text[:70] }}</span></td>
-          <td class="dim mono"><span class="clip" title="{{ o.origin }}">{{ o.origin[:44] }}</span></td>
-        </tr>
-        {% else %}
-        <tr><td colspan="4"><div class="quiet-empty">No sightings recorded.</div></td></tr>
-        {% endfor %}
-      {% endcall %}
-    </section>
   </div>
 </div>
 
@@ -100,9 +107,9 @@
   .ident { padding:18px 16px; border-bottom:1px solid var(--border); }
   .ident-ch { margin-bottom:12px; }
   .ident-num { font-size:22px; font-weight:750; letter-spacing:.5px; margin-bottom:10px;
-               word-break:break-all; }
+               display:flex; align-items:center; gap:10px; }
+  .ident-num span { word-break:break-all; }
   .ident-state { display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
-  .copy-wide { justify-content:center; height:40px; }
 
   .panel-note { margin:0; padding:12px 16px; font-size:12.5px; color:var(--text-2);
                 border-bottom:1px solid var(--border); background:var(--surface-2); }

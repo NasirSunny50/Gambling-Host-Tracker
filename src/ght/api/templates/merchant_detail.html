@@ -13,7 +13,13 @@
     <section class="panel">
       <div class="ident">
         <div class="ident-ch">{{ ui.channel(merchant.channel) }}</div>
-        <div class="ident-name">{{ merchant.merchant_name }}</div>
+        {# The name is this payee's whole identity - there is no number - so the copy
+           belongs against it, the way the number carries one on an account. #}
+        <div class="ident-name">
+          <span>{{ merchant.merchant_name }}</span>
+          <button class="copy copy-lg" type="button" title="Copy name"
+                  data-copy="{{ merchant.merchant_name }}">{{ ui.copy_icon() }}</button>
+        </div>
       </div>
       <dl class="kv">
         <div class="row"><dt>Account number</dt><dd>{{ ui.na() }}</dd></div>
@@ -24,9 +30,6 @@
         <div class="row"><dt>Times seen</dt><dd class="mono">{{ sightings | length }}</dd></div>
       </dl>
     </section>
-
-    <button class="btn copy-wide" type="button"
-            data-copy="{{ merchant.merchant_name }}">{{ ui.copy_icon() }} Copy name</button>
 
     <section class="panel">
       <h2>Every sighting</h2>
@@ -76,8 +79,9 @@
 
   .ident { padding:18px 16px; border-bottom:1px solid var(--border); }
   .ident-ch { margin-bottom:12px; }
-  .ident-name { font-size:20px; font-weight:700; letter-spacing:-.2px; word-break:break-word; }
-  .copy-wide { justify-content:center; height:40px; }
+  .ident-name { font-size:20px; font-weight:700; letter-spacing:-.2px;
+                display:flex; align-items:center; gap:10px; }
+  .ident-name span { word-break:break-word; }
 
   .shot { display:block; background:var(--surface-2); }
   .shot img { display:block; width:100%; height:auto; }

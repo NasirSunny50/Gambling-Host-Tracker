@@ -16,7 +16,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ght.api.routes import templates
+from ght.api.routes import PAGE_SIZES, Page, templates
 
 NOW = datetime(2026, 8, 20, 18, 26, tzinfo=UTC)
 
@@ -214,6 +214,46 @@ def test_detail_shows_the_number_where_it_was_published():
     assert "16 pages stored" in html
 
 
+def test_the_copy_sits_on_the_value_it_copies():
+    """The number and the name are both retyped into other systems, and a copy control
+    parked elsewhere on the page does not read as belonging to either of them."""
+    html = render(
+        "account_detail.html",
+        account=account(),
+        observations=[],
+        sites=[],
+        evidence_total=0,
+        screenshot=None,
+    )
+    number = html.index('data-copy="+8801700000000"')
+    holder = html.index('data-copy="A Holder"')
+    # Both copies come before the key/value list ends - i.e. they are on the identity
+    # block and the holder row, not a button below the panel.
+    assert number < html.index("Holder name") < holder < html.index("First seen")
+    assert "Copy account number" in html
+
+
+def test_a_sighting_reports_the_payee_not_the_collector():
+    """Origin names a CSS selector. That answers a question about how collection works,
+    which is not the question anyone opens a payee to ask."""
+    observation = SimpleNamespace(
+        id=1, run_id=7, raw_text="01700000000", origin=".payment_modal_row >> .value",
+        observed_at=NOW,
+    )
+    html = render(
+        "account_detail.html",
+        account=account(),
+        observations=[observation],
+        sites=[],
+        evidence_total=0,
+        screenshot=None,
+    )
+    assert "Sightings" in html
+    assert "#7" in html
+    assert "Origin" not in html
+    assert ".payment_modal_row" not in html
+
+
 def test_detail_says_so_plainly_when_no_picture_was_captured():
     html = render(
         "account_detail.html",
@@ -253,6 +293,9 @@ def schedule(**kw):
 
 
 RUNS_BASE = {
+    "p": Page(number=1, size=10, total=1),
+    "per": 10,
+    "page_sizes": PAGE_SIZES,
     "schedule": schedule(),
     "schedule_seconds": None,
     "schedule_per_day": 0,
@@ -436,6 +479,18 @@ def test_a_name_only_payee_says_when_no_picture_was_kept():
 
 
 # ------------------------------------------------------------------ the schedule
+
+
+def test_run_history_is_paged_like_every_other_list():
+    """The history is where a number gets a date attached to it, so it has to be walkable
+    rather than cut off at whatever the newest screenful happens to be."""
+    html = render(
+        "runs.html", job=job(), job_running=False, waiting=False, seconds_left=None,
+        phases=[], **{**RUNS_BASE, "p": Page(number=2, size=10, total=110)},
+    )
+    assert "Showing 11" in html and "of 110 runs" in html
+    assert 'href="/runs?per=10&amp;page=1"' in html  # Prev keeps the per-page choice
+    assert 'href="/runs?per=10&amp;page=3"' in html
 
 
 def test_the_schedule_offers_intervals_before_it_is_set():
