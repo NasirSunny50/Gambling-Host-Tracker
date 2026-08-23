@@ -12,7 +12,7 @@
 
 {% if run_row %}
 <div class="run-filter">
-  <span class="lead">Showing what run #{{ run_row.id }} collected</span>
+  <span class="lead">Showing what fetch #{{ run_row.id }} brought back</span>
   <span class="dim">{{ run_site.slug if run_site else "" }} &middot; {{ run_row.started_at | stamp }}</span>
   {{ ui.outcome_pill(run_row.status) }}
   <a class="btn" href="/payees">Show all payees</a>
@@ -64,7 +64,7 @@
 </div>
 {% elif run_row %}
   {{ ui.empty(
-      "Run #" ~ run_row.id ~ " collected no payees",
+      "Fetch #" ~ run_row.id ~ " brought back no payees",
       "It ran, but no account or name came back from it. The run history says how it ended
        and what it saved.",
       glyph="&#9636;",
@@ -80,8 +80,8 @@
       action_label="Clear filters") }}
 {% else %}
   {{ ui.empty(
-      "No payees collected yet",
-      "Every account and name found during a run appears here. Run collection against a site
+      "No payees fetched yet",
+      "Every account and name found during a fetch appears here. Fetch a site
        to begin.",
       glyph="&#9636;",
       action_href="/runs",

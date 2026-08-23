@@ -68,12 +68,19 @@ never clicks further, because the click after that one is the confirm.
 - **`candidates_found`** on a run means *payees brought back* (de-duplicated accounts +
   distinct names). Rows written before 2026-08-22 hold raw extraction hits and exclude
   name-only payees.
-- **One collection at a time, machine-wide.** The collector holds `data/run.lock` (pid +
+- **One fetch at a time, machine-wide.** The collector holds `data/run.lock` (pid +
   slug), so a scheduled run and a hand-started `ght run` cannot race on the login session.
 
 ## The portal
 
-Sidebar: Overview, Payees, Runs. Theme toggle in the header. `/components` documents the
+**What it is called.** The portal never says "collection run": one pass over a site is an
+**account fetch**, the sidebar item is **Fetches**, the button is **Fetch accounts now**,
+and the history is the **fetch history**. The code still calls the machinery the collection
+pipeline and the table is still `collection_runs` - the rename is the vocabulary a reader
+sees, not an identifier sweep. Keep new user-facing wording on "fetch".
+
+
+Sidebar: Overview, Payees, Fetches. Theme toggle in the header. `/components` documents the
 recurring UI elements and the reasoning (not linked in the nav).
 
 - **Overview** — accounts found, collections run, sites tracked; accounts by channel;
@@ -81,7 +88,7 @@ recurring UI elements and the reasoning (not linked in the nav).
 - **Payees** — one list of both kinds. Search + channel filter, per-page, CSV and PDF
   export. No status column, no confidence: the row says which site it came from.
 - **Detail** — one screenshot of the number on the site, plus the sightings.
-- **Runs** — manual card and schedule card side by side, then paged run history. The
+- **Fetches** — manual card and schedule card side by side, then paged fetch history. The
   outcome card after a run shows once and stands down on reload. A row opens
   `/runs/<id>`: when it went and how long it took, what it brought back, and the pages
   it stored as evidence, one row per method.

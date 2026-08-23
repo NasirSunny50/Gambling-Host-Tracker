@@ -27,7 +27,7 @@ from sqlalchemy import String, func, literal, select, union_all
 from sqlalchemy.orm import Session
 
 from ght.api import TEMPLATES_DIR
-from ght.api.jobs import manager
+from ght.api.jobs import ALL_SITES, manager
 from ght.api.schedule import MIN_MINUTES, Scheduler
 from ght.config import REPO_ROOT, settings
 from ght.db import SessionLocal
@@ -137,8 +137,8 @@ scheduler = Scheduler(manager)
 # How the newest run's outcome reads in the header. There is no alerts page: whether
 # collection is healthy has to be legible from the chrome of whatever page you are on.
 _HEALTH = {
-    "ok": ("collection healthy", "ok"),
-    "partial": ("collection degraded", "warn"),
+    "ok": ("fetching healthy", "ok"),
+    "partial": ("fetching degraded", "warn"),
     "failed": ("last run failed", "bad"),
     "blocked": ("site is blocking us", "bad"),
 }
@@ -147,7 +147,7 @@ _HEALTH = {
 def _nav(session: Session) -> dict:
     """What the shell shows on every page. One query, so it costs a page load nothing."""
     latest = session.scalar(select(CollectionRun).order_by(CollectionRun.started_at.desc()).limit(1))
-    health, tone = _HEALTH.get(latest.status, (latest.status, "warn")) if latest else ("no runs yet", "idle")
+    health, tone = _HEALTH.get(latest.status, (latest.status, "warn")) if latest else ("no fetches yet", "idle")
     return {
         "health": health,
         "health_tone": tone,
@@ -441,7 +441,7 @@ def payees(
     per: int = PAGE_SIZE,
     session: Session = Depends(get_session),
 ):
-    """One list of every payee the collector has seen."""
+    """One list of every payee the fetcher has brought back."""
     per_page = per if per in PAGE_SIZES else PAGE_SIZE
     stmt = _payee_query(channel, q, run)
     rows, page_info = _paginate(session, stmt, page, per_page=per_page, scalar=False)
@@ -657,9 +657,23 @@ def account_detail(account_id: int, request: Request, session: Session = Depends
 
 
 def _runnable_sites() -> list[dict]:
-    """The sites the portal offers to collect."""
+    """The sites a fetch can be pointed at, with "every one of them" offered first.
+
+    "All" is a choice of target rather than a second kind of fetch, so it belongs in the
+    same dropdown. It runs the active sites one after another - never at once, because a
+    fetch drives a real browser and two of them race on the login session.
+    """
     configs, _ = scan_sources()
-    return [
+    active = [c for c in configs if c.status == "active"]
+    everything = [
+        {
+            "slug": ALL_SITES,
+            "name": f"All sites ({len(active)})" if active else "All sites",
+            "status": "active",
+            "fetcher": "",
+        }
+    ] if len(active) > 1 else []
+    return everything + [
         {
             "slug": config.slug,
             "name": config.name,
@@ -745,13 +759,12 @@ def runs(
     # operator reading page three has just as much right to the card as one on page one.
     last_run = None
     if finished:
-        last_run = session.scalar(
-            select(CollectionRun)
-            .join(Site, Site.id == CollectionRun.site_id)
-            .where(Site.slug == finished.slug)
-            .order_by(CollectionRun.started_at.desc())
-            .limit(1)
-        )
+        newest = select(CollectionRun).order_by(CollectionRun.started_at.desc()).limit(1)
+        if finished.slug != ALL_SITES:
+            newest = newest.join(Site, Site.id == CollectionRun.site_id).where(
+                Site.slug == finished.slug
+            )
+        last_run = session.scalar(newest)
 
     return templates.TemplateResponse(
         request,
@@ -857,7 +870,7 @@ def components(request: Request, session: Session = Depends(get_session)):
 
 @router.post("/runs")
 def start_run(request: Request, slug: str = Form(...), session: Session = Depends(get_session)):
-    """Kick off a collection in the background. Only known site slugs are accepted."""
+    """Kick off a fetch in the background. Only known site slugs, or "all", are accepted."""
     known = {s["slug"] for s in _runnable_sites()}
     if slug not in known:
         return RedirectResponse("/runs", status_code=303)
@@ -874,7 +887,7 @@ def start_schedule(
     minutes: int = Form(...),
     session: Session = Depends(get_session),
 ):
-    """Put a site on an interval. Only known slugs, same as starting one by hand."""
+    """Put a site, or all of them, on an interval. Same targets as starting one by hand."""
     if slug not in {s["slug"] for s in _runnable_sites()}:
         return RedirectResponse("/runs", status_code=303)
 
@@ -962,7 +975,7 @@ def _describe_scope(channel: str | None, q: str | None, run_row) -> str:
     """One line naming the filters behind a report, so it cannot be mistaken for all of it."""
     parts = []
     if run_row is not None:
-        parts.append(f"run #{run_row.id}")
+        parts.append(f"fetch #{run_row.id}")
     if channel:
         parts.append(CHANNEL_LABELS.get(channel, channel))
     if q:

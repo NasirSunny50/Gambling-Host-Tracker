@@ -179,7 +179,7 @@ def test_a_collection_started_by_another_portal_blocks_this_one(tmp_path):
     manager = RunManager(lock_path=lock)
     started, message = manager.start("1xbet-bd")
     assert started is False
-    assert "another collection" in message
+    assert "another fetch" in message
     assert "someone-else" in message
 
 
@@ -242,3 +242,129 @@ def test_the_collector_takes_the_lock_and_gives_it_back(tmp_path):
 
     release_run_lock(lock)
     assert claim_run_lock("1xbet-bd", lock) is None
+
+def test_all_sites_runs_the_cli_over_every_site(monkeypatch, tmp_path):
+    """"All" is a target, not a second kind of fetch. Without --site the CLI already walks
+    every active site in turn, so both choices go down the same code path."""
+    from ght.api.jobs import ALL_SITES, RunManager
+
+    launched = {}
+
+    class FakeProc:
+        stdout = None
+        returncode = 0
+
+        def __init__(self, argv, **kw):
+            launched["argv"] = argv
+
+        def wait(self):
+            return 0
+
+        def poll(self):
+            return 0
+
+    monkeypatch.setattr("subprocess.Popen", FakeProc)
+    manager = RunManager(lock_path=tmp_path / "run.lock")
+
+    started, _ = manager.start(ALL_SITES)
+    assert started is True
+    assert "--site" not in launched["argv"]
+    assert launched["argv"][-1] == "--progress"
+
+
+def test_one_site_is_named_on_the_command_line(monkeypatch, tmp_path):
+    from ght.api.jobs import RunManager
+
+    launched = {}
+
+    class FakeProc:
+        stdout = None
+        returncode = 0
+
+        def __init__(self, argv, **kw):
+            launched["argv"] = argv
+
+        def wait(self):
+            return 0
+
+        def poll(self):
+            return 0
+
+    monkeypatch.setattr("subprocess.Popen", FakeProc)
+    manager = RunManager(lock_path=tmp_path / "run.lock")
+
+    manager.start("melbet-bd")
+    assert "--site" in launched["argv"]
+    assert launched["argv"][launched["argv"].index("--site") + 1] == "melbet-bd"
+
+def test_several_sites_are_walked_in_turn_and_say_which_one(monkeypatch):
+    """One fetch over every site runs them one after another - never at once, because a
+    fetch drives a real browser and two of them race on the login session. The checklist
+    restarts its three phases per site, so it has to name the site or it looks like it
+    began again for no reason."""
+    from types import SimpleNamespace
+
+    from ght import cli
+    from ght.progress import Update
+
+    walked = []
+    updates: list[Update] = []
+
+    def fake_run_site(session, config, dry_run=False, on_progress=None):
+        walked.append(config.slug)
+        return SimpleNamespace(
+            status="ok", slug=config.slug, error=None, extraction=None,
+            account_count=0, changes=SimpleNamespace(new_account_ids=[], disappeared_account_ids=[]),
+        )
+
+    class NullSession:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    monkeypatch.setattr(cli, "run_site", fake_run_site)
+    monkeypatch.setattr(cli, "session_scope", lambda: NullSession())
+
+    configs = [
+        SimpleNamespace(slug="site-a", name="Site A"),
+        SimpleNamespace(slug="site-b", name="Site B"),
+    ]
+    cli._collect(configs, dry_run=False, on_progress=updates.append)
+
+    assert walked == ["site-a", "site-b"]
+    said = [u.message for u in updates]
+    assert "Site 1 of 2: Site A" in said
+    assert "Site 2 of 2: Site B" in said
+
+
+def test_one_site_is_not_announced_as_one_of_one(monkeypatch):
+    """The counter is there to explain a checklist that restarts. With a single site
+    nothing restarts, and the line would be noise."""
+    from types import SimpleNamespace
+
+    from ght import cli
+    from ght.progress import Update
+
+    updates: list[Update] = []
+
+    def fake_run_site(session, config, dry_run=False, on_progress=None):
+        return SimpleNamespace(
+            status="ok", slug=config.slug, error=None, extraction=None,
+            account_count=0, changes=SimpleNamespace(new_account_ids=[], disappeared_account_ids=[]),
+        )
+
+    class NullSession:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    monkeypatch.setattr(cli, "run_site", fake_run_site)
+    monkeypatch.setattr(cli, "session_scope", lambda: NullSession())
+
+    cli._collect([SimpleNamespace(slug="site-a", name="Site A")], dry_run=False,
+                 on_progress=updates.append)
+    assert updates == []

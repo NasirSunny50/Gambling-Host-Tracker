@@ -70,7 +70,7 @@ def run(
     # and double the traffic to a site that is already watching for it. This matters more
     # now that the portal can collect on a schedule: the other one may be a run nobody is
     # sitting in front of. A dry run reads and writes nothing, so it is not gated.
-    held = None if dry_run else claim_run_lock(site or "all sites")
+    held = None if dry_run else claim_run_lock(site or "all")
     if held is not None:
         console.print(
             f"[yellow]another collection is already running[/yellow] "
@@ -94,7 +94,19 @@ def run(
 
 
 def _collect(configs, dry_run: bool, on_progress) -> None:
-    for config in configs:
+    from ght.progress import report as emit_progress
+
+    for index, config in enumerate(configs, start=1):
+        # With several sites the checklist runs three phases per site, so it has to say
+        # which one it is on - otherwise it appears to start over for no reason.
+        if len(configs) > 1:
+            emit_progress(
+                on_progress,
+                "signin",
+                f"Site {index} of {len(configs)}: {config.name}",
+                step=index,
+                total=len(configs),
+            )
         with session_scope() as session:
             report = run_site(session, config, dry_run=dry_run, on_progress=on_progress)
 

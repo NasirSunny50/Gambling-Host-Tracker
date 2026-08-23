@@ -36,7 +36,7 @@
       {% for s in sightings %}
       <div class="site-row">
         <span class="mono dim">{{ s.seen_at | stamp }}</span>
-        <span class="tag" style="margin-left:auto">run #{{ s.run_id }}</span>
+        <span class="tag" style="margin-left:auto">fetch #{{ s.run_id }}</span>
       </div>
       {% endfor %}
     </section>
@@ -64,7 +64,7 @@
           &middot; <span class="mono">sha256:{{ screenshot.sha256[:12] }}&hellip;</span>
         </div>
       {% else %}
-        <div class="quiet-empty">No screenshot was captured on the run that named this payee.</div>
+        <div class="quiet-empty">No screenshot was captured on the fetch that named this payee.</div>
       {% endif %}
     </section>
   </div>

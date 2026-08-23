@@ -1,14 +1,14 @@
 {% extends "base.html" %}
 {% import "_macros.html" as ui %}
 {% set page = "runs" %}
-{% block title %}Runs — Host Tracker{% endblock %}
-{% block heading %}Runs{% endblock %}
-{% block subtitle %}Start collection and watch it work{% endblock %}
+{% block title %}Fetches — Host Tracker{% endblock %}
+{% block heading %}Account fetches{% endblock %}
+{% block subtitle %}Fetch account data from the tracked sites, and watch it work{% endblock %}
 {% block body %}
 
 {# The schedule as a card, defined once and placed twice: beside the manual card when
    nothing is running, and on its own under the progress card when something is. It is a
-   standing arrangement rather than an action, and the first thing you look for when a run
+   standing arrangement rather than an action, and the first thing you look for when a fetch
    appears that you did not start - so it is never off the page. #}
 {% macro schedule_card() %}
 {% if schedule.enabled %}
@@ -16,7 +16,7 @@
   <div class="sched-head">
     <span class="sched-badge"><span class="dot"></span>Scheduled</span>
     <h2>Every {{ schedule.minutes }} minutes &middot;
-        <span class="mono dim">{{ schedule.slug }}</span></h2>
+        <span class="mono dim">{{ "all sites" if schedule.slug == "all" else schedule.slug }}</span></h2>
     <form method="post" action="/schedule/stop" class="sched-stop">
       <button type="submit" class="btn">Stop schedule</button>
     </form>
@@ -24,7 +24,7 @@
 
   <div class="sched-body">
     <div class="countdown">
-      <span class="countdown-k">Next collection in</span>
+      <span class="countdown-k">Next fetch in</span>
       <strong id="sched-countdown" class="countdown-n"
               data-seconds="{{ schedule_seconds if schedule_seconds is not none else '' }}">
         {%- if schedule_seconds is not none -%}
@@ -33,9 +33,9 @@
       </strong>
     </div>
     <dl class="sched-facts">
-      <div><dt>Started collecting</dt>
+      <div><dt>Started fetching</dt>
         <dd class="mono">{{ schedule.last_started | stamp if schedule.last_started else "not yet" }}</dd></div>
-      <div><dt>Works out to</dt><dd>{{ schedule_per_day }} collections a day</dd></div>
+      <div><dt>Works out to</dt><dd>{{ schedule_per_day }} fetches a day</dd></div>
     </dl>
   </div>
 
@@ -48,8 +48,8 @@
 
 {% else %}
 <section class="panel sched">
-  <h2 class="sched-title">Run on a schedule</h2>
-  <p class="sched-why">Collect on its own in the background, without anyone here. The
+  <h2 class="sched-title">Fetch on a schedule</h2>
+  <p class="sched-why">Fetches on its own in the background, without anyone here. The
      numbers rotate through the day, so a schedule catches the ones a person would miss.</p>
 
   <form method="post" action="/schedule" class="sched-form">
@@ -96,7 +96,7 @@
       <span class="waiting-icon" aria-hidden="true">&#8599;</span>
       <div class="waiting-say">
         <div class="eyebrow">Waiting for you &middot; not an error</div>
-        <h2>Sign in to continue this run</h2>
+        <h2>Sign in to continue this fetch</h2>
         <p>The saved session expired and the site is protected by a CAPTCHA that has to be
            solved by a person.</p>
       </div>
@@ -115,19 +115,19 @@
         <span><strong>Once you are in, everything continues on its own.</strong>
         Nothing further is needed on this page &mdash; leave it open.</span></div>
       <div class="fact"><span class="fact-icon" style="color:var(--warn)">&#9201;</span>
-        <span>If the wait runs out the run stops and its work is lost. There is no rush,
+        <span>If the wait runs out the fetch stops and its work is lost. There is no rush,
         but don&rsquo;t step away.</span></div>
     </div>
     {{ ui.phases(phases) }}
   </section>
 
-  {# A run in flight takes the full width; the schedule keeps its place underneath. #}
+  {# A fetch in flight takes the full width; the schedule keeps its place underneath. #}
   {{ schedule_card() }}
 
 {% elif job_running %}
   <section class="panel run-card">
     <div class="run-head">
-      <h2 class="run-title">Run in progress &middot; <span class="mono dim">{{ job.current.slug }}</span></h2>
+      <h2 class="run-title">Fetch in progress &middot; <span class="mono dim">{{ "all sites" if job.current.slug == "all" else job.current.slug }}</span></h2>
       <span class="health is-live"><span class="dot"></span>refreshing every 5s</span>
     </div>
     <p class="run-sub">Started {{ job.current.started_at | stamp }}{% if elapsed %} &middot; elapsed {{ elapsed }}{% endif %}</p>
@@ -151,7 +151,7 @@
         {% if last_run %}{{ ui.outcome_pill(last_run.status) }}
         {% else %}{{ ui.outcome_pill("failed" if failed else "ok") }}{% endif %}
         <h2 class="run-title">
-          {{ "Run stopped" if failed else "Run finished" }} &middot;
+          {{ "Fetch stopped" if failed else "Fetch finished" }} &middot;
           <span class="mono dim">{{ finished.slug }}</span>
         </h2>
       </div>
@@ -177,8 +177,8 @@
       </div>
       {% if last_run.candidates_found %}
         {# Filtered to this run, not the whole list: the question after a run is what *it*
-           brought in, and the answer is uninterpretable next to everything ever collected. #}
-        <a class="btn btn-primary" href="/payees?run={{ last_run.id }}">View what this run collected &rarr;</a>
+           brought in, and the answer is uninterpretable next to everything ever fetched. #}
+        <a class="btn btn-primary" href="/payees?run={{ last_run.id }}">View what this fetch brought back &rarr;</a>
       {% endif %}
       {% endif %}
       {% if job_log %}<div class="logbox">{% for line in job_log %}{{ line }}
@@ -186,13 +186,14 @@
     </section>
   {% endif %}
 
-  {# Once by hand, or on a timer: the two ways to collect, offered as a pair rather than
+  {# Once by hand, or on a timer: the two ways to fetch, offered as a pair rather than
      one above the other. Equal columns because neither is the lesser choice. #}
   <div class="two-up">
     <form method="post" action="/runs" class="panel start-card" onsubmit="return confirmRun(this)">
-      <h2 class="start-title">Start a collection run</h2>
+      <h2 class="start-title">Start an account fetch</h2>
       <p class="start-why">Signs in, reads every payment method, saves what it finds &mdash;
-         a couple of minutes, and this page keeps itself up to date.</p>
+         a couple of minutes, and this page keeps itself up to date. Choose
+         <strong>All sites</strong> and it works through them one after another.</p>
       <div class="field">
         <label class="field-label" for="run-slug">Site</label>
         <select name="slug" id="run-slug">
@@ -201,7 +202,7 @@
           {% endfor %}
         </select>
       </div>
-      <button class="btn-primary btn-lg" type="submit">&#9654; Start run</button>
+      <button class="btn-primary btn-lg" type="submit">&#9654; Fetch accounts now</button>
     </form>
 
     {{ schedule_card() }}
@@ -209,11 +210,11 @@
 {% endif %}
 
 <section class="panel" style="margin-top:20px">
-  <h2>Run history</h2>
+  <h2>Fetch history</h2>
   {% call ui.table([
       "Started", "Site", "Outcome",
-      "#Found|Payees this run brought back: de-duplicated accounts plus name-only payees",
-      "#New|Accounts in that count which had never been seen on any run before",
+      "#Found|Payees this fetch brought back: de-duplicated accounts plus name-only payees",
+      "#New|Accounts in that count which had never been seen on any fetch before",
       "#Pages saved|Copies kept as evidence: the page each method returned plus a picture of it, both hashed",
       "Note", ""]) %}
     {% for r in rows %}
@@ -231,12 +232,12 @@
     </tr>
     {% else %}
     <tr><td colspan="8">
-      <div class="quiet-empty">No runs yet. Once you start collecting, every run is logged
+      <div class="quiet-empty">No fetches yet. Once you start one, every fetch is logged
         here with its outcome and how many pages it saved.</div>
     </td></tr>
     {% endfor %}
   {% endcall %}
-  {% if p.total %}{{ ui.pager(p, "/runs", {"per": per}, page_sizes=page_sizes, per=per, noun="runs") }}{% endif %}
+  {% if p.total %}{{ ui.pager(p, "/runs", {"per": per}, page_sizes=page_sizes, per=per, noun="fetches") }}{% endif %}
 </section>
 
 <style>
@@ -256,7 +257,7 @@
   .tile-n { font-size:22px; font-weight:750; }
   .tile-k { font-size:12px; color:var(--text-3); }
 
-  /* The two ways to collect, side by side and the same size. Neither is the lesser
+  /* The two ways to fetch, side by side and the same size. Neither is the lesser
      choice, so neither gets the wider column or the higher position. */
   .two-up { display:grid; grid-template-columns:1fr 1fr; gap:16px; align-items:stretch;
             margin-bottom:20px; }
@@ -364,7 +365,7 @@
         // day against a live site" are one choice, and only the second one is obvious.
         if (!estimate) return;
         estimate.textContent = mins > 0
-          ? "About " + Math.floor((24 * 60) / mins) + " collections a day."
+          ? "About " + Math.floor((24 * 60) / mins) + " fetches a day."
           : "";
       }
       presets.forEach(function (b) {
@@ -402,7 +403,7 @@
   function confirmRun(form) {
     var opt = form.querySelector("#run-slug").selectedOptions[0];
     var site = opt ? opt.textContent.trim() : "this site";
-    return confirm("Start a collection run for " + site + "?");
+    return confirm("Fetch account data from " + site + "?");
   }
 </script>
 

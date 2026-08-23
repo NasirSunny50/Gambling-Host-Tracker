@@ -3,22 +3,22 @@
 {% set page = "dashboard" %}
 {% block title %}Overview — Host Tracker{% endblock %}
 {% block heading %}Overview{% endblock %}
-{% block subtitle %}What we have, and whether collection is healthy{% endblock %}
+{% block subtitle %}What we have, and whether fetching is healthy{% endblock %}
 {% block body %}
 
 {% if not totals.accounts and not runs %}
   {{ ui.empty(
-      "Nothing collected yet",
-      "This is where the collection summary will live — active accounts, the newest finds,
+      "Nothing fetched yet",
+      "This is where the summary will live — active accounts, the newest finds,
        and recent runs. Start a run to populate it.",
       glyph="&#9716;",
       action_href="/runs",
-      action_label="Start first run &rarr;") }}
+      action_label="Start first fetch &rarr;") }}
 {% else %}
 
 <div class="figures">
   {{ ui.figure(totals.accounts, "Accounts found", "numbered and name-only, all time", href="/payees") }}
-  {{ ui.figure(totals.runs, "Collections run",
+  {{ ui.figure(totals.runs, "Fetches run",
                ("since " ~ (first_run_at | day)) if first_run_at else "none yet", href="/runs") }}
   {{ ui.figure(totals.sites, "Sites tracked", "configured targets", href="/runs") }}
 </div>
@@ -39,7 +39,7 @@
         {% endfor %}
       </div>
     {% else %}
-      <div class="quiet-empty">No account is currently active. Every number collected so far
+      <div class="quiet-empty">No account is currently active. Every number fetched so far
         has rotated out — the Payees list still holds them.</div>
     {% endif %}
   </section>
@@ -65,13 +65,13 @@
         {% endfor %}
       </div>
     {% else %}
-      <div class="quiet-empty">Nothing collected yet.</div>
+      <div class="quiet-empty">Nothing fetched yet.</div>
     {% endif %}
   </section>
 </div>
 
 <section class="panel" style="margin-top:14px">
-  <h2>Recent runs</h2>
+  <h2>Recent fetches</h2>
   {% call ui.table(["Started", "Site", "Outcome", "#Found", "#New", "Note"]) %}
     {% for r in runs %}
     <tr>
@@ -87,7 +87,7 @@
       </td>
     </tr>
     {% else %}
-    <tr><td colspan="6"><div class="quiet-empty">No runs recorded yet.</div></td></tr>
+    <tr><td colspan="6"><div class="quiet-empty">No fetches recorded yet.</div></td></tr>
     {% endfor %}
   {% endcall %}
 </section>

@@ -115,7 +115,7 @@ def test_overview_with_data_shows_the_figures():
     )
     assert "Accounts found" in html
     assert ">25<" in html
-    assert "Collections run" in html
+    assert "Fetches run" in html
     assert ">42<" in html
     # NOW is 18:26 UTC, which is the 21st in Dhaka - the caption follows the reader's day,
     # not the server's.
@@ -134,7 +134,7 @@ def test_overview_before_anything_is_collected_offers_a_first_run():
         newest=[],
         sites={},
     )
-    assert "Nothing collected yet" in html
+    assert "Nothing fetched yet" in html
     assert 'href="/runs"' in html
 
 
@@ -195,7 +195,7 @@ def test_nothing_collected_yet_is_not_the_same_as_no_matches():
         per=10,
         page_sizes=(10, 25),
     )
-    assert "No payees collected yet" in html
+    assert "No payees fetched yet" in html
 
 
 # ----------------------------------------------------------------------- detail
@@ -393,8 +393,8 @@ RUNS_BASE = {
 def test_idle_runs_page_offers_to_start_one():
     html = render("runs.html", job=job(), job_running=False, waiting=False, seconds_left=None,
                   phases=[], **RUNS_BASE)
-    assert "Start a collection run" in html
-    assert "Run history" in html
+    assert "Start an account fetch" in html
+    assert "Fetch history" in html
 
 
 def test_waiting_for_sign_in_says_it_is_not_an_error():
@@ -410,7 +410,7 @@ def test_waiting_for_sign_in_says_it_is_not_an_error():
 def test_a_running_collection_shows_the_checklist_not_a_spinner():
     html = render("runs.html", job=job(True, in_flight()), job_running=True, waiting=False,
                   seconds_left=None, phases=phases(["done", "active", "pending"]), **RUNS_BASE)
-    assert "Run in progress" in html
+    assert "Fetch in progress" in html
     assert "in progress" in html
     assert "refreshing every 5s" in html
 
@@ -425,7 +425,7 @@ def test_a_finished_run_summarises_what_it_collected():
         phases=phases(["done", "done", "done"]),
         **{**RUNS_BASE, "last_run": run_row(status="partial")},
     )
-    assert "Run finished" in html
+    assert "Fetch finished" in html
     assert "pages saved" in html
     assert "partial" in html
     # The link after a run asks what *this* run brought in, not what has ever been collected.
@@ -452,7 +452,7 @@ def test_a_failed_run_is_not_dressed_up_as_a_finished_one():
         **{**RUNS_BASE, "last_run": run_row(status="failed", candidates_found=0, accounts_new=0,
                                             error="Login session expired and sign-in did not recover it")},
     )
-    assert "Run stopped" in html
+    assert "Fetch stopped" in html
     assert "Run finished" not in html
     assert "/payees?run=" not in html
     assert "Login session expired" in html
@@ -518,7 +518,10 @@ def test_sites_tracked_follows_the_configs_not_the_database(monkeypatch, tmp_pat
     assert len(_runnable_sites()) == 1
 
     (tmp_path / "two.yaml").write_text(source.replace("demo-site", "demo-site-2"), encoding="utf-8")
-    assert len(_runnable_sites()) == 2
+    sites = _runnable_sites()
+    # "All sites" leads the list once there is more than one site to choose between.
+    assert sites[0]["slug"] == "all"
+    assert len([s for s in sites if s["slug"] != "all"]) == 2
 
 
 def test_a_name_only_payee_has_a_page_and_a_picture():
@@ -568,7 +571,7 @@ def test_run_history_is_paged_like_every_other_list():
         "runs.html", job=job(), job_running=False, waiting=False, seconds_left=None,
         phases=[], **{**RUNS_BASE, "p": Page(number=2, size=10, total=110)},
     )
-    assert "Showing 11" in html and "of 110 runs" in html
+    assert "Showing 11" in html and "of 110 fetches" in html
     assert 'href="/runs?per=10&amp;page=1"' in html  # Prev keeps the per-page choice
     assert 'href="/runs?per=10&amp;page=3"' in html
 
@@ -576,7 +579,7 @@ def test_run_history_is_paged_like_every_other_list():
 def test_the_schedule_offers_intervals_before_it_is_set():
     html = render("runs.html", job=job(), job_running=False, waiting=False, seconds_left=None,
                   phases=[], **RUNS_BASE)
-    assert "Run on a schedule" in html
+    assert "Fetch on a schedule" in html
     assert 'data-minutes="60"' in html
     assert 'action="/schedule"' in html
 
@@ -594,7 +597,7 @@ def test_a_live_schedule_says_when_the_next_one_lands():
     )
     assert "Every 30 minutes" in html
     assert "12:34" in html  # 754 seconds
-    assert "48 collections a day" in html
+    assert "48 fetches a day" in html
     assert 'action="/schedule/stop"' in html
     # Setting it again is not offered while it is set: stop is the way out.
     assert 'class="sched-form"' not in html
@@ -624,7 +627,7 @@ def test_the_schedule_is_visible_while_a_collection_is_in_flight():
            "schedule": schedule(enabled=True, slug="demo-site", minutes=30),
            "schedule_seconds": 120, "schedule_per_day": 48},
     )
-    assert "Run in progress" in html
+    assert "Fetch in progress" in html
     assert "Every 30 minutes" in html
 
 

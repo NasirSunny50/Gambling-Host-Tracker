@@ -35,15 +35,20 @@ The system is a single Python application with four faces onto the same core:
 
 | Face | What it is for |
 |---|---|
-| Collector | Drives a real browser through a site's deposit flow and records what it finds |
-| Portal | A read-only, server-rendered web interface over the collected data |
+| Fetcher | Drives a real browser through a site's deposit flow and records what it finds |
+| Portal | A read-only, server-rendered web interface over the fetched data |
 | CLI | Operational commands: run, recon, export, verify, status |
-| Scheduler | Runs a collection on an interval without anyone at the keyboard |
+| Scheduler | Runs an account fetch on an interval without anyone at the keyboard |
 
-A typical working day is: the operator opens the portal, starts a collection from the Runs
-page, signs in once when the site shows its CAPTCHA, and the run completes by itself. The
-payees it brought back are then filtered, exported to CSV for the blocklist feed, or
-printed as a PDF report for a case file.
+One pass of the fetcher over one site is an **account fetch** — the term the interface
+uses throughout, and the unit everything else is counted in. In the code and in the
+sections below it is also called the collection pipeline, which is what the machinery is;
+"fetch" is what the operator starts and what the history lists.
+
+A typical working day is: the operator opens the portal, starts a fetch from the Fetches
+page — one site, or all of them in turn — signs in once when the site shows its CAPTCHA,
+and it completes by itself. The payees it brought back are then filtered, exported to CSV
+for the blocklist feed, or printed as a PDF report for a case file.
 
 ### At a glance
 
@@ -68,7 +73,7 @@ the stage before it. The dependency direction is strictly downward.
 | Layer | Modules | Responsibility |
 |---|---|---|
 | Interface | `cli.py`, `api/routes`, `api/templates` | Commands and pages. No domain logic. |
-| Orchestration | `pipeline/run.py`, `api/jobs.py`, `api/schedule.py` | Sequencing one run, and deciding when a run may start |
+| Orchestration | `pipeline/run.py`, `api/jobs.py`, `api/schedule.py` | Sequencing one fetch, and deciding when a fetch may start |
 | Acquisition | `fetchers/`, `auth_login.py`, `browserlaunch.py` | Getting the bytes: sessions, browsers, click flows |
 | Interpretation | `extractors/`, `normalize/` | Turning a page into validated, canonical account records |
 | Persistence | `models.py`, `pipeline/dedup.py`, `pipeline/changeset.py`, `pipeline/evidence.py` | Storing sightings, de-duplicating identities, keeping evidence |
@@ -85,15 +90,15 @@ This is a deliberate structural choice with three consequences:
 - **A site redesign is a configuration diff.** When an operator moves a button, the fix is
   one YAML line, reviewed and merged like any other change.
 - **Git history becomes the audit trail.** For any date, the repository can answer "what
-  was the collector looking for on that day", which matters when a stored piece of evidence
+  was the fetcher looking for on that day", which matters when a stored piece of evidence
   is questioned months later.
 - **Adding a site adds no code.** A new target is a new YAML file and two environment
   variables.
 
-### 3.3 Request path of one collection
+### 3.3 Request path of one fetch
 
 ```
-Portal "Start run"  or  scheduler tick  or  ght run
+Portal "Fetch accounts now"   or   scheduler tick   or   ght run
         |
         v
   machine-wide lock (data/run.lock)  --- held? -> refuse, name the holder
@@ -117,7 +122,7 @@ Portal "Start run"  or  scheduler tick  or  ght run
 |---|---|---|
 | ORM and schema | SQLAlchemy 2.0 + Alembic | Typed declarative models; portable column types keep SQLite and PostgreSQL on one schema |
 | Validation | Pydantic 2 | Site configuration is validated on load, so a malformed YAML fails at startup with a named field rather than mid-run |
-| HTML parsing | selectolax 0.4 | C-backed; the collector parses the same large page twice per probe |
+| HTML parsing | selectolax 0.4 | C-backed; the fetcher parses the same large page twice per probe |
 | Browser automation | Playwright 1.62 (Chromium) | The deposit panels are JavaScript applications inside iframes; nothing less will reach them |
 | HTTP | httpx | For sites that render server-side and need no browser |
 | Web framework | FastAPI + Jinja2 | Server-rendered pages, no client-side framework, no build step |
@@ -184,9 +189,9 @@ run that collected one merchant and nothing else must not report that it found n
 
 ---
 
-## 6. The collection pipeline
+## 6. What one fetch does
 
-One run against one site proceeds in six stages.
+One fetch against one site proceeds in six stages.
 
 **1. Sign in.** Before anything is fetched, not after a failure. See section 8.
 
@@ -318,10 +323,10 @@ submits in a hidden browser. If the site answers with a CAPTCHA or 2FA it stops 
 
 **3. Ask the operator.** A visible browser window opens, already filled in, leaving only
 the challenge and the button. The moment the success marker appears the session is captured
-and collection continues *within the same run*. If nobody finishes in five minutes, the run
+and the fetch continues *without restarting*. If nobody finishes in five minutes, the fetch
 reports the expiry and stops.
 
-Success is **proved before the session is saved**: the page collection actually needs is
+Success is **proved before the session is saved**: the page the fetch actually needs is
 loaded and checked. Declaring success on a login-form heuristic is how a logged-out session
 gets saved and every subsequent probe fails.
 
@@ -364,14 +369,15 @@ Three capabilities exist because real sites required them:
 
 ## 9. Concurrency, scheduling and progress
 
-**One collection at a time, machine-wide.** A collection drives a real browser against a
-live account; two at once race on the login session. The gate is a lock file holding a
-process id, so it holds across processes — a scheduled run and a hand-started CLI run
-cannot collide, and a second portal cannot start one either. A lock whose process is gone,
-or one older than any real collection, is cleared rather than left to block every future
+**One fetch at a time, machine-wide.** A fetch drives a real browser against a live
+account; two at once race on the login session. The gate is a lock file holding a process
+id, so it holds across processes — a scheduled fetch and a hand-started CLI run cannot
+collide, and a second portal cannot start one either. An all-sites fetch is one fetch that
+walks several sites, not several fetches. A lock whose process is gone,
+or one older than any real fetch, is cleared rather than left to block every future
 run.
 
-**Collections run as detached subprocesses.** A run takes minutes and cannot occupy a web
+**Fetches run as detached subprocesses.** A fetch takes minutes and cannot occupy a web
 request.
 
 **Progress is streamed as text.** The subprocess writes one marked JSON object per line to
@@ -397,9 +403,13 @@ Server-rendered pages over the collected data, bound to loopback.
 | Overview | How much has been found, across which channels, and what arrived most recently |
 | Payees | One list of both kinds of payee, searchable and filterable, with CSV and PDF export |
 | Payee detail | The number, the holder, one screenshot of it on the site, and every sighting |
-| Runs | Start a collection, set a schedule, and the paged history |
-| Run detail | When a run went, how long it took, what it brought back, what it stored |
+| Fetches | Start an account fetch, set a schedule, and the paged history |
+| Fetch detail | When a fetch went, how long it took, what it brought back, what it stored |
 | Components | The recurring interface elements and the reasoning behind them |
+
+A fetch is pointed at one site or at **All sites**, which walks the active ones one after
+another. Never at once: a fetch drives a real browser, and two of them race on the login
+session.
 
 Design decisions recorded in the code:
 
@@ -408,7 +418,7 @@ Design decisions recorded in the code:
 - "Not applicable" and "unknown" are **different marks**. One means there is nothing to
   collect here; the other means there was something and we failed to collect it. A blank
   cell would let a reader mistake one for the other.
-- There is **no alerts page**, on purpose. Whether collection is healthy is legible from
+- There is **no alerts page**, on purpose. Whether fetching is healthy is legible from
   the data itself.
 - All timestamps are Bangladesh local time at +06:00, in one format, everywhere.
 
@@ -539,9 +549,10 @@ merged.
 
 | Term | Meaning |
 |---|---|
+| Account fetch | One pass over one site: sign in, read every method, store what was found |
 | Probe | One payment method's click path and selectors within a site configuration |
 | Payee | Anything receiving deposits: a numbered account or a name-only merchant |
-| Sighting | One observation of one payee in one run; never updated |
+| Sighting | One observation of one payee in one fetch; never updated |
 | Channel | The payment scheme a number belongs to |
 | Evidence | Stored page bytes and screenshot, addressed by SHA-256 |
 | Reset | The proven-closed step that lets consecutive probes share one loaded panel |

@@ -1,12 +1,12 @@
 {% extends "base.html" %}
 {% import "_macros.html" as ui %}
 {% set page = "runs" %}
-{% block title %}Run #{{ run.id }} — Host Tracker{% endblock %}
-{% block heading %}Run #{{ run.id }}{% endblock %}
-{% block subtitle %}What this collection did, and what it brought back{% endblock %}
+{% block title %}Fetch #{{ run.id }} — Host Tracker{% endblock %}
+{% block heading %}Fetch #{{ run.id }}{% endblock %}
+{% block subtitle %}What this fetch did, and what it brought back{% endblock %}
 {% block body %}
 
-<p class="back"><a href="/runs">&lsaquo; Back to runs</a></p>
+<p class="back"><a href="/runs">&lsaquo; Back to fetches</a></p>
 
 <div class="detail">
   <div class="col">
@@ -19,15 +19,15 @@
       <dl class="kv">
         <div class="row"><dt>Started</dt><dd class="mono">{{ run.started_at | stamp }}</dd></div>
         <div class="row"><dt>Finished</dt>
-          {# A run that never wrote a finish did not end - it was killed, or the machine
+          {# A fetch that never wrote a finish did not end - it was killed, or the machine
              went down under it. Saying "unknown" is the truthful reading; a dash would
-             look like a run that took no time at all. #}
+             look like a fetch that took no time at all. #}
           <dd class="mono">{% if run.finished_at %}{{ run.finished_at | stamp }}
               {%- else %}{{ ui.unknown() }}{% endif %}</dd></div>
         <div class="row"><dt>Took</dt>
           <dd class="mono">{{ duration if duration else ui.unknown() }}</dd></div>
         <div class="row"><dt>Site</dt><dd>{{ site.name if site else ui.unknown() }}</dd></div>
-        <div class="row"><dt>Fetcher</dt><dd class="mono">{{ run.fetcher }}</dd></div>
+        <div class="row"><dt>Engine</dt><dd class="mono">{{ run.fetcher }}</dd></div>
         <div class="row"><dt>HTTP status</dt>
           <dd class="mono">{{ run.http_status or ui.unknown() }}</dd></div>
       </dl>
@@ -35,7 +35,7 @@
 
     {% if run.url %}
     <section class="panel">
-      <h2>Page it collected from</h2>
+      <h2>Page it fetched from</h2>
       {# Credential-bearing query parameters are replaced with REDACTED when the capture is
          taken, so this is safe to show and to hand on. #}
       <div class="url mono">{{ run.url }}</div>
@@ -44,7 +44,7 @@
 
     {% if run.error %}
     {# The note's colour follows the outcome, not the fact that there is a note. A healthy
-       run that reports "the site switched two methods off" is telling you about the site;
+       fetch that reports "the site switched two methods off" is telling you about the site;
        painting that red sends someone looking for a fault of ours that does not exist. #}
     {% set tone = {"ok": "info", "partial": "warn"}.get(run.status, "bad") %}
     <section class="panel">
@@ -52,7 +52,7 @@
       <div class="callout {{ tone }}">{{ run.error }}</div>
       {% if run.status in ("ok", "partial") %}
       <p class="why">
-        A method the site has switched off leaves the run healthy &mdash; nothing here is
+        A method the site has switched off leaves the fetch healthy &mdash; nothing here is
         broken and there is nothing to repair. A method that could not be
         <em>read</em> means a selector no longer matches the page, which is a config fix.
       </p>
@@ -78,7 +78,7 @@
     </div>
 
     <section class="panel">
-      <h2>What it collected</h2>
+      <h2>What it brought back</h2>
       {% if payees %}
       {% call ui.table(["Channel", "Number", "Name", "Site"]) %}
         {% for r in payees %}
@@ -97,7 +97,7 @@
       </div>
       {% else %}
       <div class="quiet-empty">
-        This run brought back no payee. A run can end that way honestly &mdash; the site
+        This fetch brought back no payee. A fetch can end that way honestly &mdash; the site
         switches methods off for hours at a time &mdash; so the outcome above says whether
         anything was actually wrong.
       </div>
@@ -106,11 +106,11 @@
 
     <section class="panel">
       <h2>Pages saved as evidence &mdash; {{ evidence_total }}</h2>
-      {# What the column on the runs table counts. Each method a run reads leaves the page
+      {# What the column on the fetch table counts. Each method a fetch reads leaves the page
          the server actually returned plus a picture of it, both hashed, so a number can be
          shown later to have come from those exact bytes. #}
       <p class="panel-note">
-        Every method this run read leaves the page the server returned and a picture of it,
+        Every method this fetch read leaves the page the server returned and a picture of it,
         each stored under the SHA-256 of its own bytes. That is what makes a collected
         number defensible months later: the file can be re-hashed and shown to be the same
         page the number was read from.
@@ -138,7 +138,7 @@
       {% endcall %}
       {% else %}
       <div class="quiet-empty">
-        Nothing was stored. A run that never reached a page has nothing to keep.
+        Nothing was stored. A fetch that never reached a page has nothing to keep.
       </div>
       {% endif %}
     </section>

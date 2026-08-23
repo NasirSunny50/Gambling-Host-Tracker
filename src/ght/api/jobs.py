@@ -36,6 +36,11 @@ from ght.progress import PHASES, parse_line
 # one that is genuinely held.
 LOCK_PATH = REPO_ROOT / "data" / "run.lock"
 
+# The slug that means "every active site, one after another". It is a slug rather than a
+# separate control because it answers the same question the dropdown asks - which site -
+# and a second button for it would imply a second kind of fetch.
+ALL_SITES = "all"
+
 # A collection that has held the lock this long is not coming back: the longest real one
 # includes a five-minute wait for a person to sign in, so this is well clear of it.
 LOCK_MAX_AGE = timedelta(minutes=30)
@@ -198,10 +203,10 @@ class RunManager:
         return self._current is not None and self._current.running
 
     def start(self, slug: str) -> tuple[bool, str]:
-        """Launch ``ght run --site <slug>``. Returns (started, message)."""
+        """Launch a fetch, for one site or for all of them. Returns (started, message)."""
         with self._lock:
             if self.is_running:
-                return False, f"a collection is already running ({self._current.slug})"
+                return False, f"a fetch is already running ({self._current.slug})"
 
             # And not one started outside this portal either. Scheduling makes that a
             # real possibility: a collection fires on its own while someone is running
@@ -209,14 +214,17 @@ class RunManager:
             held = _lock_holder(self._lock_path)
             if held is not None:
                 return False, (
-                    f"another collection is already running ({held.get('slug', 'unknown')}, "
+                    f"another fetch is already running ({held.get('slug', 'unknown')}, "
                     f"started by process {held.get('pid')})"
                 )
 
             # Run the package as a module so it uses the same interpreter and installed
             # environment as the portal, rather than depending on a console script on PATH.
+            # Without --site the CLI walks every active site in turn, which is exactly
+            # what "all" means here - so there is one code path for both, not two.
+            target = [] if slug == ALL_SITES else ["--site", slug]
             self._proc = subprocess.Popen(
-                [sys.executable, "-m", "ght.cli", "run", "--site", slug, "--progress"],
+                [sys.executable, "-m", "ght.cli", "run", *target, "--progress"],
                 cwd=str(REPO_ROOT),
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
@@ -225,7 +233,7 @@ class RunManager:
             self._current = RunInfo(slug=slug, started_at=datetime.now(UTC))
             self._log_tail = []
             threading.Thread(target=self._watch, args=(self._proc, self._current), daemon=True).start()
-            return True, f"collection started for {slug}"
+            return True, f"fetch started for {slug}"
 
     def _watch(self, proc: subprocess.Popen, info: RunInfo) -> None:
         """Drain output and record completion. Runs on its own thread."""
