@@ -90,6 +90,7 @@ class BrowserFetcher:
         unavailable: list[str] | None = None,
         flow_timeout: int | None = None,
         reset=None,
+        shot: str | None = None,
     ) -> None:
         self.timeout = (timeout if timeout is not None else settings.request_timeout) * 1000
         # Optional selector to wait for, so we capture after the deposit panel renders
@@ -122,6 +123,8 @@ class BrowserFetcher:
         self._entered_frame = None
         # How to close an open modal so the next probe can use the same loaded panel.
         self.reset = reset
+        # The element worth photographing, when the page around it is not.
+        self.shot = shot
 
     def _auth_kwargs(self) -> tuple[dict, str | None]:
         """Reuse a saved browser session when the deposit page sits behind a login.
@@ -527,6 +530,27 @@ class BrowserFetcher:
             'playwright not installed; pip install -e ".[browser]" && playwright install chromium',
         )
 
+    def _shoot(self, page, target) -> bytes | None:
+        """The picture that goes with this capture.
+
+        The configured element if it is there to be photographed, the whole page if not.
+        Falling back rather than failing matters: the same probe list ends on a provider's
+        own checkout, where there is no panel and the page is the evidence.
+        """
+        if not self.screenshot:
+            return None
+        if self.shot:
+            try:
+                element = target.query_selector(self.shot)
+                if element is not None and element.is_visible():
+                    return element.screenshot()
+            except Exception:  # noqa: BLE001, S110 - an unphotographable element is not a failure
+                pass  # the whole page below is still a true picture of where we were
+        try:
+            return page.screenshot(full_page=True)
+        except Exception:  # noqa: BLE001 - a capture without a picture is still a capture
+            return None
+
     def _capture_here(self, page, response, auth_warning: str | None):
         """Walk the current probe's flow on an already-open page and capture the result."""
         target, frame_error = self._target(page)
@@ -547,7 +571,7 @@ class BrowserFetcher:
             url=redact_url(target.url),
             status_code=response.status if response else 0,
             html=html,
-            screenshot=page.screenshot(full_page=True) if self.screenshot else None,
+            screenshot=self._shoot(page, target),
             headers=dict(response.headers) if response else {},
             fetcher=self.name,
             fetched_at=datetime.now(UTC),
@@ -676,7 +700,7 @@ class BrowserFetcher:
                     url=redact_url(target.url),
                     status_code=response.status if response else 0,
                     html=html,
-                    screenshot=page.screenshot(full_page=True) if self.screenshot else None,
+                    screenshot=self._shoot(page, target),
                     headers=dict(response.headers) if response else {},
                     fetcher=self.name,
                     fetched_at=datetime.now(UTC),

@@ -93,6 +93,7 @@ def _fetcher_kwargs(config: SourceConfig) -> dict:
         "logged_out_marker": config.logged_out_marker,
         "unavailable": config.unavailable,
         "reset": config.reset,
+        "shot": config.shot,
     }
     if config.timeout is not None:
         kwargs["timeout"] = config.timeout

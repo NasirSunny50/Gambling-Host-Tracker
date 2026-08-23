@@ -439,8 +439,18 @@ unbounded. `ght verify-evidence` re-hashes stored blobs against their recorded d
 names any that no longer match.
 
 For each method a fetch reads, two artefacts are kept: the page the server returned, and a
-screenshot of it. Neither is surfaced on the fetch page - what a reader acts on there is
-the payees - and the screenshot instead appears on the payee it belongs to. The screenshot is the part a non-technical reviewer can actually read,
+screenshot. The picture is of the panel naming the payee rather than the whole page, where
+configuration says which element that is - a deposit page is thousands of pixels of lobby
+around one small panel, and the panel is the evidence. Where there is no such element, as
+on a provider's own checkout, the page itself is captured.
+
+Neither artefact is surfaced on the fetch page - what a reader acts on there is the payees
+- and the screenshot appears instead on the payee it belongs to. Which screenshot that is
+has to be established rather than assumed: a fetch photographs every method, so the picture
+shown is the one from the method whose stored page can be shown to have published *that*
+number, matched across the forms a page prints it in. Where no stored page can be shown to
+carry it, the payee shows no picture at all. Another method's screenshot would be evidence
+of the wrong thing. The screenshot is the part a non-technical reviewer can actually read,
 and for a name-only payee it is the whole of the evidence.
 
 ---

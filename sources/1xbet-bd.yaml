@@ -64,6 +64,11 @@ reset:
   click: ".modal-payment__close"
   gone: ".modal-payment.active"
 
+# What to photograph. The deposit page runs to thousands of pixels of lobby around one
+# small panel, and the panel is the payee. Where a probe ends up somewhere without one -
+# a provider's own checkout - this finds nothing and the whole page is captured instead.
+shot: ".modal-payment.active"
+
 # Present only when signed out; its appearance means the session must be refreshed.
 logged_out_marker: registration-layout-widget
 # A dead session redirects the account page to /en/user/login.

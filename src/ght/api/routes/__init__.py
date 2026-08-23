@@ -31,6 +31,7 @@ from ght.api.jobs import ALL_SITES, manager
 from ght.api.schedule import MIN_MINUTES, Scheduler
 from ght.config import REPO_ROOT, settings
 from ght.db import SessionLocal
+from ght.extractors.regex_sweep import page_text
 from ght.models import (
     AccessLog,
     Account,
@@ -41,6 +42,7 @@ from ght.models import (
     Observation,
     Site,
 )
+from ght.normalize.msisdn import translate_digits
 from ght.sources import scan_sources
 
 router = APIRouter()
@@ -546,15 +548,55 @@ def merchant_detail(sighting_id: int, request: Request, session: Session = Depen
     )
 
 
+def _number_forms(account: Account, sighting: Observation | None) -> list[str]:
+    """Every shape this account's number could take on a page.
+
+    What is stored is canonical - ``+8801XXXXXXXXX`` - and what a site prints is not. It
+    prints the national form, sometimes with spaces in it, sometimes in Bengali numerals,
+    and for a Rocket wallet with a check digit on the end. Searching a page for the
+    canonical string therefore found nothing on almost every mobile wallet.
+    """
+    forms = []
+    if sighting is not None and sighting.raw_text:
+        forms.append(sighting.raw_text)
+    number = account.account_number or ""
+    if number:
+        forms.append(number)
+        if number.startswith("+880"):
+            forms.append("0" + number[4:])
+    return forms
+
+
+def _page_shows(body: str, forms: list[str]) -> bool:
+    """Whether this stored page is one that actually published the number.
+
+    Read from the page's visible text rather than its markup, so a digit sequence that
+    happens to sit inside an attribute or a script cannot pass for a published payee. The
+    digits-only comparison at the end is for the pages that print a number with spaces
+    through it.
+    """
+    text = translate_digits(page_text(body))
+    if any(form in text for form in forms):
+        return True
+    digits = re.sub(r"\D", "", text)
+    return any(
+        len(bare := re.sub(r"\D", "", form)) >= 9 and bare in digits for form in forms
+    )
+
+
 def _screenshot_for(session: Session, account: Account) -> Evidence | None:
-    """The picture of this number on the site, from the last run that saw it.
+    """The picture of this number on the site, from the last fetch that saw it.
 
     A page of hashes proves the number was published; a screenshot *shows* it, which is
-    what a reviewer who does not read HTML actually needs. Finding the right one matters:
-    a run captures every method, so the screenshot has to come from the method whose page
-    carried this number. Evidence paths are ``<slug>/<probe>/<xx>/<sha>.<ext>``, so the
-    stored HTML that contains the number names the probe, and the screenshot beside it in
-    the same probe folder is the picture of that page.
+    what a reviewer who does not read HTML actually needs. Which one matters: a fetch
+    captures every method, and the screenshot has to come from the method whose page
+    carried *this* number. Evidence paths are ``<slug>/<probe>/<xx>/<sha>.<ext>``, so the
+    stored page that shows the number names the probe, and the screenshot beside it in the
+    same probe folder is the picture of that page.
+
+    Returns None when no stored page can be shown to have published it. Showing some other
+    method's screenshot instead would put one payee's evidence on another payee's page,
+    which is worse than showing nothing at all.
     """
     latest = session.scalar(
         select(Observation)
@@ -565,13 +607,17 @@ def _screenshot_for(session: Session, account: Account) -> Evidence | None:
     if latest is None:
         return None
 
+    # Oldest first: a closed modal leaves its markup behind, so a later method's page can
+    # still carry the previous one's number. The first page to show it is the one that
+    # opened it.
     blobs = session.scalars(
-        select(Evidence).where(Evidence.run_id == latest.run_id).order_by(Evidence.id.desc())
+        select(Evidence).where(Evidence.run_id == latest.run_id).order_by(Evidence.id)
     ).all()
     shots = [b for b in blobs if b.kind == "screenshot"]
     if not shots:
         return None
 
+    forms = _number_forms(account, latest)
     for html_blob in (b for b in blobs if b.kind == "html"):
         try:
             body = (settings.evidence_dir / html_blob.path).read_text(
@@ -579,15 +625,12 @@ def _screenshot_for(session: Session, account: Account) -> Evidence | None:
             )
         except OSError:
             continue
-        if account.account_number and account.account_number in body:
+        if _page_shows(body, forms):
             probe = _probe_of(html_blob)
             match = next((s for s in shots if _probe_of(s) == probe), None)
             if match is not None:
                 return match
-
-    # No stored page names it - a number can be normalised away from the exact digits on
-    # the page - so fall back to the run's own first screenshot rather than showing nothing.
-    return shots[-1]
+    return None
 
 
 @router.get("/evidence/{evidence_id}.png")

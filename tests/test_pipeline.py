@@ -365,3 +365,109 @@ def test_found_counts_payees_rather_than_extraction_hits(session, server):
 
     run = session.scalar(select(CollectionRun).order_by(CollectionRun.id.desc()))
     assert run.candidates_found == report.account_count + len(set(report.merchants))
+
+# --------------------------------------------------- which screenshot belongs to a payee
+
+
+def _store(tmp_path, probe, name, body, shot=b"PNG"):
+    """Write one probe's evidence the way a fetch would, and return its two rows."""
+    from ght.models import Evidence
+    from ght.pipeline.evidence import store_blob
+
+    html = store_blob(f"melbet-bd/{probe}", "html", body.encode("utf-8"), root=tmp_path)
+    png = store_blob(f"melbet-bd/{probe}", "screenshot", shot + probe.encode(), root=tmp_path)
+    return (
+        Evidence(run_id=1, kind="html", path=html.path, sha256=html.sha256, bytes=html.bytes),
+        Evidence(run_id=1, kind="screenshot", path=png.path, sha256=png.sha256, bytes=png.bytes),
+    )
+
+
+def _payee_fixture(session, tmp_path, monkeypatch):
+    """One fetch of three methods, each publishing its own wallet."""
+    from ght.api.routes import settings as route_settings
+    from ght.models import Account, CollectionRun, Observation, Site
+
+    monkeypatch.setattr(route_settings, "evidence_dir", tmp_path)
+
+    site = Site(slug="melbet-bd", name="Melbet")
+    session.add(site)
+    session.flush()
+    run = CollectionRun(id=1, site_id=site.id, status="ok", fetcher="browser", started_at=utcnow())
+    session.add(run)
+    session.flush()
+
+    pages = {
+        "cellfin-free": "<html><body><p>CellFin Free Wallet Number 01351752316</p></body></html>",
+        "rocket": "<html><body><p>Rocket wallet 016287960189</p></body></html>",
+        "upay": "<html><body><p>Upay number 01853678501</p></body></html>",
+    }
+    for probe, body in pages.items():
+        for row in _store(tmp_path, probe, probe, body):
+            session.add(row)
+
+    accounts = {}
+    for channel, number in (
+        ("cellfin", "+8801351752316"),
+        ("rocket", "+8801628796018"),
+        ("upay", "+8801853678501"),
+    ):
+        account = Account(channel=channel, account_number=number, bank_key="")
+        session.add(account)
+        session.flush()
+        session.add(
+            Observation(
+                run_id=run.id, site_id=site.id, account_id=account.id,
+                raw_text=number, origin="selector", confidence=0.9, observed_at=utcnow(),
+            )
+        )
+        accounts[channel] = account
+    session.flush()
+    return accounts
+
+
+def test_a_payee_gets_the_picture_of_its_own_method(session, tmp_path, monkeypatch):
+    """The bug this covers put one payee's evidence on another payee's page. Stored numbers
+    are canonical (+8801...) and pages print the national form, so matching the stored
+    string against the page never hit for a mobile wallet - and every one of them fell back
+    to whichever screenshot came first."""
+    from ght.api.routes import _probe_of, _screenshot_for
+
+    accounts = _payee_fixture(session, tmp_path, monkeypatch)
+
+    assert _probe_of(_screenshot_for(session, accounts["cellfin"])) == "cellfin-free"
+    assert _probe_of(_screenshot_for(session, accounts["rocket"])) == "rocket"
+    assert _probe_of(_screenshot_for(session, accounts["upay"])) == "upay"
+
+
+def test_a_rocket_wallet_matches_the_check_digit_the_page_prints(session, tmp_path, monkeypatch):
+    """Rocket publishes twelve digits and the account is keyed on the eleven that identify
+    it, so the page never contains the stored string exactly."""
+    from ght.api.routes import _probe_of, _screenshot_for
+
+    accounts = _payee_fixture(session, tmp_path, monkeypatch)
+    assert _probe_of(_screenshot_for(session, accounts["rocket"])) == "rocket"
+
+
+def test_no_picture_beats_the_wrong_picture(session, tmp_path, monkeypatch):
+    """When no stored page can be shown to have published the number, the page says so.
+    Showing some other method's screenshot would be evidence of the wrong thing."""
+    from ght.api.routes import _screenshot_for
+    from ght.models import Account, Observation
+
+    accounts = _payee_fixture(session, tmp_path, monkeypatch)
+    site_id = session.scalar(select(Site.id))
+
+    stranger = Account(channel="bkash", account_number="+8801999999999", bank_key="")
+    session.add(stranger)
+    session.flush()
+    session.add(
+        Observation(
+            run_id=1, site_id=site_id, account_id=stranger.id, raw_text="+8801999999999",
+            origin="regex_sweep", confidence=0.3, observed_at=utcnow(),
+        )
+    )
+    session.flush()
+
+    assert _screenshot_for(session, stranger) is None
+    # And the payees that are on those pages are unaffected.
+    assert _screenshot_for(session, accounts["upay"]) is not None

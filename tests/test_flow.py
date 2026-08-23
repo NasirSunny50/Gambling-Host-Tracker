@@ -966,3 +966,77 @@ def test_a_source_without_a_reset_keeps_fetching_one_probe_at_a_time():
         probes=[Probe(name="a", wait_for="#a"), Probe(name="b", wait_for="#b")],
     )
     assert _collect_in_one_visit(config, list(config.probes), None) is None
+
+# ------------------------------------------------------------------ what gets photographed
+
+
+class ShotPage:
+    """A page with one photographable panel on it."""
+
+    def __init__(self, panel_visible=True, has_panel=True):
+        self.panel_visible = panel_visible
+        self.has_panel = has_panel
+        self.full_page_shots = 0
+
+    def query_selector(self, selector):
+        if not self.has_panel:
+            return None
+        page = self
+
+        class Element:
+            @staticmethod
+            def is_visible():
+                return page.panel_visible
+
+            @staticmethod
+            def screenshot():
+                return b"just-the-panel"
+
+        return Element()
+
+    def screenshot(self, full_page=False):
+        self.full_page_shots += 1
+        return b"the-whole-lobby"
+
+
+def test_the_picture_is_of_the_panel_that_names_the_payee():
+    """A deposit page is thousands of pixels of lobby around one small panel. The panel is
+    the evidence; the lobby is what someone has to scroll past to find it."""
+    fetcher = BrowserFetcher(shot=".modal-payment.active")
+    page = ShotPage()
+
+    assert fetcher._shoot(page, page) == b"just-the-panel"
+    assert page.full_page_shots == 0
+
+
+def test_a_page_with_no_panel_is_photographed_whole():
+    """The same probe list ends on a provider's own checkout, where there is no panel and
+    the page itself is the payee."""
+    fetcher = BrowserFetcher(shot=".modal-payment.active")
+    page = ShotPage(has_panel=False)
+
+    assert fetcher._shoot(page, page) == b"the-whole-lobby"
+
+
+def test_a_panel_that_is_present_but_not_on_screen_is_not_the_picture():
+    """A closed modal keeps its markup. Photographing it would return a blank rectangle
+    and file it as evidence."""
+    fetcher = BrowserFetcher(shot=".modal-payment.active")
+    page = ShotPage(panel_visible=False)
+
+    assert fetcher._shoot(page, page) == b"the-whole-lobby"
+
+
+def test_without_a_configured_panel_the_whole_page_is_the_picture():
+    fetcher = BrowserFetcher()
+    page = ShotPage()
+
+    assert fetcher._shoot(page, page) == b"the-whole-lobby"
+
+
+def test_screenshots_can_be_switched_off_entirely():
+    fetcher = BrowserFetcher(shot=".modal-payment.active", screenshot=False)
+    page = ShotPage()
+
+    assert fetcher._shoot(page, page) is None
+    assert page.full_page_shots == 0

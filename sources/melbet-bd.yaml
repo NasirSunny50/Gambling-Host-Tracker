@@ -64,6 +64,11 @@ reset:
   click: ".modal-payment__close"
   gone: ".modal-payment.active"
 
+# What to photograph. The deposit page runs to thousands of pixels of lobby around one
+# small panel, and the panel is the payee. Where a probe ends up somewhere without one -
+# a provider's own checkout - this finds nothing and the whole page is captured instead.
+shot: ".modal-payment.active"
+
 # Verified 2026-08-23: a logged-out request for /en/office/recharge answers 200 and lands on
 # /en/user/login?return-url=... , so the URL is the reliable expiry signal here.
 logged_out_url: /user/login

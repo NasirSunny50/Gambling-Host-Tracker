@@ -237,6 +237,11 @@ class SourceConfig(_Strict):
     # request for the account page by redirecting to its login page. More reliable than a
     # body marker, since the login page shares no markup with the deposit page.
     logged_out_url: str | None = None
+    # The element to photograph, when a page is mostly not the payee. These deposit pages
+    # run to thousands of pixels of lobby around one small panel, and a reviewer opening the
+    # evidence needs the panel. Unset, or absent from the page, means capture all of it -
+    # which is right for a provider's checkout, where the payee *is* the page.
+    shot: str | None = None
     ignore_numbers: list[str] = Field(default_factory=list)
     notes: str | None = None
 
