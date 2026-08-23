@@ -114,6 +114,8 @@ class BrowserFetcher:
         self.flow_timeout = (flow_timeout * 1000) if flow_timeout is not None else self.timeout
         # Set by _walk when the site declared a method unavailable.
         self._unavailable_hit: str | None = None
+        # Set by _walk when a step moved the flow into a different frame.
+        self._entered_frame = None
         # How to close an open modal so the next probe can use the same loaded panel.
         self.reset = reset
 
@@ -151,46 +153,73 @@ class BrowserFetcher:
 
         return {"storage_state": state}, None
 
-    def _walk(self, page) -> str | None:
+    def _enter_frame(self, page, needle: str):
+        """The frame a step wants, once it exists. None if it never turns up.
+
+        Polled rather than assumed: the frame is created in answer to the click before it,
+        and the document inside it arrives later still.
+        """
+        waited = 0
+        while waited <= self.flow_timeout:
+            for frame in page.frames:
+                if needle in (frame.url or "") and not _detached(frame):
+                    return frame
+            page.wait_for_timeout(500)
+            waited += 500
+        return None
+
+    def _walk(self, target, page=None) -> str | None:
         """Click through the configured flow. Returns an error string if a step fails.
 
         A failed step still lets the capture through: the partial page is evidence that the
         flow broke, and pairing it with the screenshot is how someone works out which
         button moved.
+
+        A step may name a frame, which it and every step after it act inside. ``page`` is
+        the tab those frames are looked up on; without one the flow simply stays where it
+        started, which is every flow that has no frame to move into.
         """
         self._unavailable_hit = None
+        self._entered_frame = None
+        tab = page or target
         for index, step in enumerate(self.flow, start=1):
             try:
-                page.wait_for_selector(step.target, timeout=self.flow_timeout)
+                if step.frame:
+                    entered = self._enter_frame(tab, step.frame)
+                    if entered is None:
+                        return f"flow step {index}: no frame matching {step.frame!r} appeared"
+                    target = entered
+                    self._entered_frame = entered
+                target.wait_for_selector(step.target, timeout=self.flow_timeout)
                 if step.select:
-                    missing = self._missing_option(page, step)
+                    missing = self._missing_option(target, step)
                     if missing is not None:
                         return f"flow step {index}: {missing}"
                     # force=True because these dropdowns are Select2 widgets: the real
                     # <select> is a 1x1 accessibility shim behind a styled replacement, and
                     # the usual actionability checks never pass on it.
-                    page.select_option(
+                    target.select_option(
                         step.select, label=step.option, force=True, timeout=self.flow_timeout
                     )
                 elif step.fill:
                     # Typed rather than assigned: these forms enable the next button from
                     # the input's own key events, and a value set straight onto the element
                     # leaves the button disabled and the step reported as a broken selector.
-                    page.click(step.fill, timeout=self.flow_timeout)
-                    page.fill(step.fill, "", timeout=self.flow_timeout)
-                    page.type(step.fill, step.value, delay=40, timeout=self.flow_timeout)
+                    target.click(step.fill, timeout=self.flow_timeout)
+                    target.fill(step.fill, "", timeout=self.flow_timeout)
+                    target.type(step.fill, step.value, delay=40, timeout=self.flow_timeout)
                 else:
-                    page.click(step.click, timeout=self.flow_timeout)
+                    target.click(step.click, timeout=self.flow_timeout)
                 if step.wait_for:
                     # Race the expected panel against the site's own "unavailable" one.
                     # Waiting only for the expected one means a method the operator has
                     # switched off costs a full timeout and is then reported as our
                     # selector being broken, which is the wrong thing to go and fix.
-                    self._wait_for_either(page, step.wait_for)
+                    self._wait_for_either(target, step.wait_for)
                     if self._unavailable_hit:
                         return None
                 else:
-                    page.wait_for_load_state("networkidle", timeout=self.flow_timeout)
+                    target.wait_for_load_state("networkidle", timeout=self.flow_timeout)
             except Exception as exc:  # noqa: BLE001 - a broken step is a reportable result
                 if step.optional:
                     continue
@@ -325,6 +354,11 @@ class BrowserFetcher:
         """
         if navigated:
             return page
+        # A step that moved into another frame - a provider's own deposit form - is where
+        # the probe ended up, so that is what to read. The configured frame is the panel it
+        # started in, which by now holds something else entirely.
+        if self._entered_frame is not None and not _detached(self._entered_frame):
+            return self._entered_frame
         if self.frame:
             for frame in page.frames:
                 # A frame the flow navigated away from can linger in page.frames while being
@@ -477,7 +511,7 @@ class BrowserFetcher:
         """Walk the current probe's flow on an already-open page and capture the result."""
         target, frame_error = self._target(page)
         start_url = page.url
-        flow_error = None if frame_error else self._walk(target)
+        flow_error = None if frame_error else self._walk(target, page)
 
         navigated = self._await_navigation(page, start_url)
         target = self._capture_target(page, navigated=navigated)
@@ -595,7 +629,7 @@ class BrowserFetcher:
 
                 target, frame_error = self._target(page)
                 start_url = page.url
-                flow_error = None if frame_error else self._walk(target)
+                flow_error = None if frame_error else self._walk(target, page)
 
                 # A step can navigate the whole tab (confirming a deposit hands off to the
                 # provider's own checkout). That is asynchronous, so give it a moment to

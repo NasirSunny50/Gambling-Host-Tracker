@@ -97,6 +97,11 @@ class Step(_Strict):
     # site will accept, and the smallest one it accepts is the one to send.
     option: str | None = None
     value: str | None = None
+    # Substring of the URL of the frame this step acts in, when that is not the document
+    # the probe started in. A payment aggregator hands the deposit form to an iframe of its
+    # own - sometimes nested inside another - and a selector aimed at the document the
+    # method cell lived in matches nothing there, which looks exactly like a stale selector.
+    frame: str | None = None
     # Selector to wait for afterwards, so the next step acts on a rendered page.
     wait_for: str | None = None
     # A step that may legitimately be absent (an interstitial that only shows sometimes).

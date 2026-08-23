@@ -175,26 +175,116 @@ probes:
         value: ".modal-message-address"
         bank_name: "Dutch-Bangla Bank"
 
-# Still to add, both blocked on a live check the site kept cutting short:
+  # Bank Transfer shows nothing until a recipient bank is chosen, so it takes one probe per
+  # option in its dropdown. Choosing one fills the modal in place - no further click - with
+  # the account number, the bank as the site writes it, and the account holder, each in its
+  # own copyable element.
+  #
+  # The option labels are quoted exactly as the site renders them, numbering and stray
+  # punctuation included ("1.UCB Bank", "2. Pubali Bank."). They are the site's own wording
+  # and they drift; a label that no longer matches fails the probe fast and names what the
+  # dropdown offers instead, which is a one-line fix here.
+  #
+  # `bank_name` is set from the option rather than read off the page: the page's own Bank
+  # Name field carries the operator's shorthand ("Islami Bank,CellFin.") rather than the
+  # institution, and a blocklist needs the institution.
+  - name: bank-ucb
+    flow:
+      - click: '.payment-cell[data-method="melbet_bt_bangla"]'
+        wait_for: '.modal-payment.active select[name="bank"]'
+      - select: 'select[name="bank"]'
+        option: "1.UCB Bank"
+        wait_for: ".modal-payment.active .modal-message-address"
+    wait_for: ".modal-payment.active .modal-message-address"
+    blocks:
+      - channel: bank_transfer
+        container: ".modal-payment.active .payment_modal_body"
+        value: ".payment_modal_row:nth-of-type(2) .modal-message-address"
+        holder: ".payment_modal_row:nth-of-type(4) .modal-message-address"
+        bank_name: "United Commercial Bank"
+
+  - name: bank-pubali
+    flow:
+      - click: '.payment-cell[data-method="melbet_bt_bangla"]'
+        wait_for: '.modal-payment.active select[name="bank"]'
+      - select: 'select[name="bank"]'
+        option: "2. Pubali Bank."
+        wait_for: ".modal-payment.active .modal-message-address"
+    wait_for: ".modal-payment.active .modal-message-address"
+    blocks:
+      - channel: bank_transfer
+        container: ".modal-payment.active .payment_modal_body"
+        value: ".payment_modal_row:nth-of-type(2) .modal-message-address"
+        holder: ".payment_modal_row:nth-of-type(4) .modal-message-address"
+        bank_name: "Pubali Bank"
+
+  - name: bank-dutch-bangla
+    flow:
+      - click: '.payment-cell[data-method="melbet_bt_bangla"]'
+        wait_for: '.modal-payment.active select[name="bank"]'
+      - select: 'select[name="bank"]'
+        option: "DUTCH BANGLA BANK,"
+        wait_for: ".modal-payment.active .modal-message-address"
+    wait_for: ".modal-payment.active .modal-message-address"
+    blocks:
+      - channel: bank_transfer
+        container: ".modal-payment.active .payment_modal_body"
+        value: ".payment_modal_row:nth-of-type(2) .modal-message-address"
+        holder: ".payment_modal_row:nth-of-type(4) .modal-message-address"
+        bank_name: "Dutch-Bangla Bank"
+
+  - name: bank-islami
+    flow:
+      - click: '.payment-cell[data-method="melbet_bt_bangla"]'
+        wait_for: '.modal-payment.active select[name="bank"]'
+      - select: 'select[name="bank"]'
+        option: "Islami Bank"
+        wait_for: ".modal-payment.active .modal-message-address"
+    wait_for: ".modal-payment.active .modal-message-address"
+    blocks:
+      - channel: bank_transfer
+        container: ".modal-payment.active .payment_modal_body"
+        value: ".payment_modal_row:nth-of-type(2) .modal-message-address"
+        holder: ".payment_modal_row:nth-of-type(4) .modal-message-address"
+        bank_name: "Islami Bank Bangladesh"
+
+  # Nagad by Paykassma. This one has to be paid for to be read: the payee only exists once
+  # a deposit request has been raised, so every run of this probe raises one - a real
+  # request on the operator, for 200 BDT, which is never paid and cannot be, because
+  # nothing is ever sent. That is what `creates_order` marks, and the portal names it
+  # before a run.
+  #
+  # What it yields is a name, not a wallet. The checkout asks the payer for *their* Nagad
+  # number and shows only the business collecting - so there is no receiving account to
+  # store, and the name rotates between requests. That pool of names is the intelligence.
+  #
+  # Three documents deep: the method cell lives in the deposit panel, the amount form in
+  # paykassma's own iframe nested inside it, and pressing Next takes the whole tab to
+  # Nagad's checkout. Hence the `frame:` on the second step - without it the selectors run
+  # against the panel, match nothing, and report a stale config.
+  #
+  # 200 is the site's own minimum for this method ("more than 200"), so it is the smallest
+  # request that can be raised to see the name.
+  - name: nagad-paykassma
+    channel: nagad
+    creates_order: true
+    flow:
+      - click: '.payment-cell[data-method="nagad_melbet_p2c"]'
+      - frame: plugin.pay-melbet2.com
+        fill: 'input[name="amount"]'
+        value: "200"
+        wait_for: 'button:has-text("Next")'
+      - click: 'button:has-text("Next")'
+    wait_for: ".merchant-name"
+    merchant: ".merchant-name"
+
+# Not collected, and why:
 #
-#   cellfin_bt_melbet (Bank transfer > Cellfin) - the cell would not open on the shared
-#     panel and no modal appeared. Needs a visit of its own to see whether it is switched
-#     off, in a section that has to be opened first, or simply slower than the others.
-#
-#   melbet_bt_bangla (Bank transfer) - the modal opens with a bank dropdown and nothing
-#     else. `select[name="bank"]` offered exactly, on 2026-08-23:
-#       "Select recipient's bank" | "1.UCB Bank" | "2. Pubali Bank." | "DUTCH BANGLA BANK,"
-#       | "Islami Bank"
-#     Those labels are the site's own wording, numbering and stray punctuation included,
-#     and have to be copied exactly. One probe per bank, each with bank_name set from the
-#     option. What the modal shows once a bank is chosen has not been seen yet - there is a
-#     #btn_next button in it, which may or may not be needed before the details appear.
-#
-#   nagad_melbet_p2c (Nagad by Paykassma) - same non-opening cell as cellfin_bt. Its flow
-#     is known from the operator: type 200 into the amount, press Next, and the payee is
-#     the merchant name on the Nagad checkout the browser lands on. Confirming a deposit is
-#     what gets there, so this probe raises a real - unpaid - deposit request every run and
-#     must carry `creates_order: true`.
+#   cellfin_bt_melbet (Bank transfer > Cellfin) - the site withdrew it partway through this
+#     recon. It was in the list at 12:10 and gone by 13:00, with the method count dropping
+#     from 72 to 71 and the Bank transfer section down to one entry. A probe for a method
+#     that is not on the page can only time out and report itself as broken, so it is left
+#     out rather than left to cry wolf; the id above is what to search for if it returns.
 
 ignore_numbers: []
 

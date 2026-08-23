@@ -670,6 +670,78 @@ def test_an_amount_of_zero_is_a_value_like_any_other():
     assert Step(fill="#amount", value="0").value == "0"
 
 
+class FramePage(FakePage):
+    """A tab whose frames appear only after the click that creates them."""
+
+    def __init__(self, frames_after_click=("https://plugin.example/nagad_api",)):
+        super().__init__()
+        self.frames = [self]
+        self._pending = list(frames_after_click)
+        self.url = "https://site.example/office/recharge"
+
+    def click(self, selector, timeout=None):
+        self.clicked.append(selector)
+        for url in self._pending:
+            self.frames.append(PluginFrame(url, self))
+        self._pending = []
+
+    def is_detached(self):
+        return False
+
+
+class PluginFrame(FakePage):
+    def __init__(self, url, tab):
+        super().__init__()
+        self.url = url
+        self.tab = tab
+        self.typed = []
+
+    def is_detached(self):
+        return False
+
+    def fill(self, selector, value, timeout=None):
+        pass
+
+    def type(self, selector, text, delay=None, timeout=None):
+        self.typed.append((selector, text))
+
+
+def test_a_step_can_move_the_flow_into_another_frame():
+    """An aggregator hands its deposit form to an iframe of its own. Without following it,
+    every selector after that click matches nothing and reports a stale config."""
+    fetcher = BrowserFetcher(
+        flow=[
+            Step(click=".method"),
+            Step(frame="plugin.example", fill="input[name=amount]", value="200"),
+        ]
+    )
+    tab = FramePage()
+
+    assert fetcher._walk(tab, tab) is None
+    inner = tab.frames[-1]
+    assert inner.typed == [("input[name=amount]", "200")]
+    # The capture has to come from the frame the flow ended in, not the one it started in.
+    assert fetcher._capture_target(tab, navigated=False) is inner
+
+
+def test_a_frame_that_never_appears_is_named_rather_than_waited_out_silently():
+    fetcher = BrowserFetcher(
+        flow=[Step(frame="never-shows-up.example", click=".x")], flow_timeout=1
+    )
+    tab = FramePage(frames_after_click=())
+
+    error = fetcher._walk(tab, tab)
+    assert error is not None
+    assert "never-shows-up.example" in error
+
+
+def test_a_flow_with_no_frame_step_stays_where_it_started():
+    fetcher = BrowserFetcher(flow=[Step(click=".method", wait_for=".panel")])
+    page = FakePage()
+    assert fetcher._walk(page) is None
+    assert page.clicked == [".method"]
+
+
 # ------------------------------------------- capturing after the flow leaves the frame
 
 
