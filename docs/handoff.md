@@ -11,7 +11,9 @@ survey the whole tree.
 
 Collects the mobile-wallet and bank account numbers gambling sites publish for deposits, so
 a bank's AML team can blocklist them. Numbers rotate daily, so it keeps every sighting and
-stores the page it came from, hashed, as evidence. One target so far: `1xbet-bd`.
+stores the page it came from, hashed, as evidence. Two targets: `1xbet-bd` and `melbet-bd`,
+which run the same platform - same login form, same embedded panel, same modal markup -
+under different method ids.
 
 ## How to run things
 
@@ -43,8 +45,13 @@ Portal → **Runs** → *Start run*, or on a schedule. One run:
 Takes ~80s. Live progress streams from the subprocess (`ght/progress.py`, marker-prefixed
 JSON lines) and renders as a 3-step checklist.
 
-Per-site config is `sources/1xbet-bd.yaml`. Site markup drifts often; a stale selector is a
+Per-site config is `sources/<slug>.yaml`. Site markup drifts often; a stale selector is a
 config fix, not a code fix. The `notes:` block at the bottom holds the recon history.
+
+`ght recon --site <slug>` is how a site gets configured or repaired: it signs in the way a
+run does and prints every method with its id, every dropdown with its exact option labels,
+and - with `--open <method-id>` - the elements in one method's panel. It opens a method and
+never clicks further, because the click after that one is the confirm.
 
 ## Things that will confuse you if you don't know them
 
@@ -90,6 +97,25 @@ name-only payees given a page, a screenshot and a place in every count; schedule
 one is still running, survives restart); PDF export (`export/report.py`) with per-page
 header, footer, provenance and page numbers; drawn icons throughout.
 
+## Melbet, as of 2026-08-23
+
+Thirteen numbered payees and one name, collected in one run of fourteen probes: CellFin
+Free, Nagad, Rocket, uPay, Nagad Free (which prints the business name beside the number),
+Trust Axiata Pay, Rocket Free, iPay, Nexus Pay, and Bank Transfer once per bank in its
+dropdown (UCB, Pubali, Dutch-Bangla, Islami). `nagad-paykassma` is the fourteenth and the
+only one that costs a deposit request.
+
+Three things about that site are worth knowing before touching it:
+
+- **The network drops it in bursts.** Connections to the host are refused for minutes at a
+  time and then work again - a local filter, not the site. The browser fetcher retries a
+  refused load `MAX_RETRIES` times, 8s apart; this machine's `.env` is set to 6, and a run
+  still takes seven or eight minutes rather than the ~80s 1xBet takes.
+- **Cellfin under Bank transfer vanished mid-recon** - present at 12:10, gone by 13:00. No
+  probe is configured for it; its id is in the yaml if it comes back.
+- **Rocket publishes twelve digits**, the wallet's mobile plus a check digit. The extractor
+  keys it on the mobile and only reads it that way when the block says Rocket.
+
 ## Known open items
 
 - **Brand logos are local, not in git.** `data/branding/` is gitignored and ships empty —
@@ -116,5 +142,6 @@ header, footer, provenance and page numbers; drawn icons throughout.
 - Nothing sensitive in git: `data/` (sessions, DB, evidence, schedule) and `.env` are
   ignored, and real collected account numbers must not go into code, tests, or comments.
 - Commit and push after each working change, with a message explaining *why*.
-- A run against 1xBet initiates one real (unpaid) deposit request via the `fast-nagad`
-  probe. Ask before starting one.
+- Two probes reach their payee by confirming a deposit, which initiates a real (unpaid)
+  deposit request on the operator: `fast-nagad` on 1xBet and `nagad-paykassma` on Melbet.
+  Both are marked `creates_order`. Ask before starting a run that includes one.

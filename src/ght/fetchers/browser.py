@@ -22,6 +22,10 @@ from ght.types import RawCapture
 # Query parameters that carry a live credential. Embedded payment apps routinely take a
 # short-lived JWT in the URL, and that URL is stored on the run and shown in exports - so
 # it would put a working session token in front of everyone reading the AML reports.
+# How long to wait before asking a refused connection again. Long enough for a burst of
+# refusals to pass, short enough that a genuinely dead host still fails inside the run.
+RETRY_PAUSE_MS = 8000
+
 SECRET_QUERY_KEYS = frozenset(
     {"h_token", "token", "access_token", "auth", "sig", "signature", "session", "key"}
 )
@@ -302,6 +306,26 @@ class BrowserFetcher:
         self._used_channel = identity
         return browser
 
+    def _goto(self, page, url: str):
+        """Load a URL, giving a refused connection another go before writing it off.
+
+        These hosts are reached over networks that drop connections to them in bursts - a
+        request refused outright now is often answered a few seconds later. One attempt per
+        mirror turned that into a failed run reporting "the site did not load", which sends
+        someone to check a site that was never down. Only a connection that never answers
+        counts as a failure; a page that loads and says 403 is a different thing and is not
+        retried here.
+        """
+        last: Exception | None = None
+        for attempt in range(1, max(1, settings.max_retries) + 1):
+            try:
+                return page.goto(url, timeout=self.timeout, wait_until="domcontentloaded"), None
+            except Exception as exc:  # noqa: BLE001 - the next attempt is the point
+                last = exc
+                if attempt < settings.max_retries:
+                    page.wait_for_timeout(RETRY_PAUSE_MS)
+        return None, last
+
     def _target(self, page) -> tuple[object, str | None]:
         """The document the flow and the capture belong to.
 
@@ -443,14 +467,10 @@ class BrowserFetcher:
                     if needs_load:
                         response = None
                         for url in urls:
-                            try:
-                                response = page.goto(
-                                    url, timeout=self.timeout, wait_until="domcontentloaded"
-                                )
+                            response, _ = self._goto(page, url)
+                            if response is not None:
                                 landing = url
                                 break
-                            except Exception:  # noqa: BLE001, S112 - try the next mirror
-                                continue
                         if response is None:
                             captures.extend(
                                 self._failed(landing, "no configured url could be loaded")
@@ -625,7 +645,11 @@ class BrowserFetcher:
                     **auth_kwargs,
                 )
                 page = context.new_page()
-                response = page.goto(url, timeout=self.timeout, wait_until="domcontentloaded")
+                response, load_error = self._goto(page, url)
+                if response is None:
+                    context.close()
+                    browser.close()
+                    return self._failed(url, f"could not load: {load_error}")
 
                 target, frame_error = self._target(page)
                 start_url = page.url
