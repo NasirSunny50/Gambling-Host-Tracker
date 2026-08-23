@@ -166,16 +166,34 @@ def test_a_schedule_outlives_the_portal(tmp_path):
     assert revived.state.minutes == 45
 
 
-def test_a_slot_missed_while_the_portal_was_down_collects_on_the_way_up(tmp_path):
-    """The point of a schedule is that collection keeps happening. A missed slot means
-    collect now, not wait out another interval."""
+def test_a_slot_missed_while_the_portal_was_down_is_not_caught_up_on(tmp_path):
+    """Starting the portal must not fetch. Catching the missed slot up meant every start
+    fetched immediately - the same surprise as a schedule that fetched the moment it was
+    set, and on some sites a surprise that costs a deposit request."""
     missed = (datetime.now(UTC) - timedelta(hours=3)).isoformat()
-    path = _saved(tmp_path / "schedule.json", next_due=missed)
+    path = _saved(tmp_path / "schedule.json", minutes=60, next_due=missed)
 
     manager = FakeManager()
     revived = Scheduler(manager, state_path=path)
     revived.resume()
-    revived.tick()
+
+    assert revived.tick() is None
+    assert manager.started == []
+    # An interval from coming back up, not three hours ago and not an hour after that.
+    assert 59 * 60 <= revived.seconds_until_next <= 60 * 60
+
+
+def test_a_schedule_still_runs_after_a_restart(tmp_path):
+    """Not catching up is not the same as not running: the next slot still comes."""
+    missed = (datetime.now(UTC) - timedelta(hours=3)).isoformat()
+    path = _saved(tmp_path / "schedule.json", minutes=60, next_due=missed)
+
+    manager = FakeManager()
+    revived = Scheduler(manager, state_path=path)
+    revived.resume()
+    _due_now(revived)
+
+    assert revived.tick() is not None
     assert manager.started == ["1xbet-bd"]
 
 

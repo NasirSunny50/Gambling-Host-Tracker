@@ -168,13 +168,16 @@ class Scheduler:
     def resume(self) -> None:
         """Pick a saved schedule back up after a restart.
 
-        The next run is pulled forward if its time passed while the portal was down: the
-        point of a schedule is that collection keeps happening, so a missed slot means
-        collect now, not wait out another interval.
+        A slot missed while the portal was down is not caught up on. Starting the portal
+        would otherwise fetch immediately, every time, which is the same surprise as a
+        schedule that fetched the moment it was set - and on a site whose payee is only
+        reachable by confirming a deposit, a surprise that costs a deposit request. The
+        next fetch is one interval from coming back up.
         """
         if self._state.enabled:
             if self._state.next_due is None or self._state.next_due < _now():
-                self._state.next_due = _now()
+                self._state.next_due = _now() + timedelta(minutes=self._state.minutes)
+                self._save()
             self._ensure_thread()
 
     # ---------------------------------------------------------------- the loop
