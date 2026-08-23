@@ -173,7 +173,6 @@
       <div class="tiles">
         <div class="tile"><div class="tile-n mono">{{ last_run.candidates_found }}</div><div class="tile-k">payees found</div></div>
         <div class="tile"><div class="tile-n mono" style="{{ 'color:var(--ok)' if last_run.accounts_new }}">{{ last_run.accounts_new }}</div><div class="tile-k">new accounts</div></div>
-        <div class="tile"><div class="tile-n mono">{{ evidence_counts.get(last_run.id, 0) }}</div><div class="tile-k">pages saved</div></div>
       </div>
       {% if last_run.candidates_found %}
         {# Filtered to this run, not the whole list: the question after a run is what *it*
@@ -214,8 +213,7 @@
   {% call ui.table([
       "Started", "Site", "Outcome",
       "#Found|Payees this fetch brought back: de-duplicated accounts plus name-only payees",
-      "#New|Accounts in that count which had never been seen on any fetch before",
-      "#Pages saved|Copies kept as evidence: the page each method returned plus a picture of it, both hashed",
+      "#New|Payees in that count which had never been seen on any earlier fetch",
       "Note", ""]) %}
     {% for r in rows %}
     <tr class="linked" data-href="/runs/{{ r.id }}">
@@ -224,14 +222,13 @@
       <td>{{ ui.outcome_pill(r.status) }}</td>
       <td class="num mono">{{ r.candidates_found }}</td>
       <td class="num mono" style="{{ 'color:var(--ok)' if r.accounts_new }}">{{ r.accounts_new }}</td>
-      <td class="num mono dim">{{ evidence_counts.get(r.id, 0) }}</td>
       <td class="{{ 'dim' if r.error else 'mute' }} note">
         {%- if r.error %}<span title="{{ r.error }}">{{ r.error }}</span>{% else %}&mdash;{% endif -%}
       </td>
       <td class="nowrap"><a href="/runs/{{ r.id }}">Details &rsaquo;</a></td>
     </tr>
     {% else %}
-    <tr><td colspan="8">
+    <tr><td colspan="7">
       <div class="quiet-empty">No fetches yet. Once you start one, every fetch is logged
         here with its outcome and how many pages it saved.</div>
     </td></tr>

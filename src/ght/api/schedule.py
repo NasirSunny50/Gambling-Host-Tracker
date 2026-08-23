@@ -144,9 +144,11 @@ class Scheduler:
                 enabled=True,
                 slug=slug,
                 minutes=minutes,
-                # The first collection goes now rather than one interval from now: someone
-                # who just set this up should see it work, not wonder whether it will.
-                next_due=_now(),
+                # The first fetch is one interval away, not immediate. Setting a schedule
+                # is arranging for later; firing one straight away made it indistinguishable
+                # from the button beside it, and started a fetch nobody had asked for -
+                # including, on some sites, a deposit request.
+                next_due=_now() + timedelta(minutes=minutes),
                 last_started=self._state.last_started,
                 last_note="",
             )

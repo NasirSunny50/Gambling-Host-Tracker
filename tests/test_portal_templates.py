@@ -216,7 +216,6 @@ def test_detail_shows_the_number_where_it_was_published():
     )
     assert '/evidence/42.png' in html
     assert "sha256:aaaaaaaaaaaa" in html
-    assert "16 pages stored" in html
 
 
 def test_the_copy_sits_on_the_value_it_copies():
@@ -286,23 +285,60 @@ def render_run_detail(**kw):
         "site": SimpleNamespace(slug="1xbet-bd", name="1xBet Bangladesh"),
         "payees": [],
         "duration": "1m 22s",
-        "probes": [],
-        "evidence_total": 0,
+        "new_accounts": set(),
+        "new_merchants": set(),
+        "new_count": 0,
     }
     return render("run_detail.html", **{**context, **kw})
 
 
 def test_a_run_says_when_it_went_and_how_long_it_took():
-    html = render_run_detail(
-        probes=[("upay", {"html": blob(), "screenshot": blob(id=6, kind="screenshot")})],
-        evidence_total=2,
-    )
+    html = render_run_detail()
     # Dhaka time, like every other timestamp in the portal.
     assert "21/08/2026 12:26 AM" in html  # started
     assert "21/08/2026 12:27 AM" in html  # finished
     assert "1m 22s" in html
-    assert "upay" in html
-    assert "/evidence/6.png" in html
+
+
+def fetched_payee(**kw):
+    fields = {"id": 5, "kind": "account", "channel": "bkash", "number": "+8801700000000",
+              "name": "A Holder", "bank": None, "site": "1xbet-bd"}
+    return SimpleNamespace(**{**fields, **kw})
+
+
+def test_a_payee_never_seen_before_is_marked_on_its_own_row():
+    """The figure above the list says how many are new. Only the list can say which, and
+    that is the question someone opens a fetch to answer."""
+    html = render_run_detail(
+        payees=[fetched_payee(id=5), fetched_payee(id=6, number="+8801800000000")],
+        new_accounts={6},
+        new_count=1,
+    )
+    rows = html.split("<tr")
+    marked = [r for r in rows if "tag-new" in r]
+    assert len(marked) == 1
+    assert "/accounts/6" in marked[0]
+
+
+def test_a_name_only_payee_can_be_new_too():
+    """A merchant has no account id to key on, so it is matched by the name and channel
+    the fetch saw - and it counts as a new payee exactly like a numbered one."""
+    html = render_run_detail(
+        payees=[fetched_payee(kind="merchant", id=9, number=None, name="ABABIL FASHION",
+                          channel="nagad")],
+        new_merchants={("ABABIL FASHION", "nagad")},
+        new_count=1,
+    )
+    assert "tag-new" in html
+
+
+def test_a_fetch_does_not_explain_evidence_or_repeat_its_own_url():
+    """Both were standing text: the same paragraph on every fetch, and a query string
+    nobody reads. What the fetch found is what the page is for."""
+    html = render_run_detail()
+    assert "pages saved as evidence" not in html.lower()
+    assert "Page it fetched from" not in html
+    assert "which is a config fix" not in html
 
 
 def test_a_run_that_never_finished_does_not_claim_a_duration():
@@ -426,7 +462,6 @@ def test_a_finished_run_summarises_what_it_collected():
         **{**RUNS_BASE, "last_run": run_row(status="partial")},
     )
     assert "Fetch finished" in html
-    assert "pages saved" in html
     assert "partial" in html
     # The link after a run asks what *this* run brought in, not what has ever been collected.
     assert 'href="/payees?run=7"' in html

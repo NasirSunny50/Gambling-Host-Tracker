@@ -60,7 +60,7 @@
                alt="The checkout page naming {{ merchant.merchant_name }}">
         </a>
         <div class="shot-note">
-          Captured {{ screenshot.captured_at | stamp }} &middot; run #{{ screenshot.run_id }}
+          Captured {{ screenshot.captured_at | stamp }} &middot; fetch #{{ screenshot.run_id }}
           &middot; <span class="mono">sha256:{{ screenshot.sha256[:12] }}&hellip;</span>
         </div>
       {% else %}

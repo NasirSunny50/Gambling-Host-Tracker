@@ -57,6 +57,13 @@ def test_starting_a_schedule_collects_straight_away(scheduler):
     assert started
     assert "every 30 minutes" in message
 
+    # Not yet: setting a schedule arranges for later. Firing one straight away made it
+    # indistinguishable from the button beside it and started a fetch nobody asked for.
+    assert sched.tick() is None
+    assert manager.started == []
+    assert 29 * 60 <= sched.seconds_until_next <= 30 * 60
+
+    _due_now(sched)
     assert sched.tick() is not None
     assert manager.started == ["1xbet-bd"]
 
@@ -65,6 +72,7 @@ def test_the_next_one_is_an_interval_later(scheduler):
     manager = FakeManager()
     sched = scheduler(manager)
     sched.start("1xbet-bd", 30)
+    _due_now(sched)
     sched.tick()
 
     # Nothing is due again yet, and nothing is collected.
@@ -98,6 +106,7 @@ def test_a_tick_that_lands_on_a_running_collection_skips_it(scheduler):
     manager = FakeManager(running=True)
     sched = scheduler(manager)
     sched.start("1xbet-bd", 15)
+    _due_now(sched)
 
     note = sched.tick()
     assert manager.started == []
@@ -111,6 +120,7 @@ def test_a_refused_start_is_reported_rather_than_swallowed(scheduler):
     manager = FakeManager(accepts=False)
     sched = scheduler(manager)
     sched.start("1xbet-bd", 15)
+    _due_now(sched)
 
     sched.tick()
     assert "already running" in sched.state.last_note
@@ -192,3 +202,17 @@ def test_an_interval_is_also_reported_as_runs_per_day(scheduler):
 
     sched.start("1xbet-bd", 360)
     assert sched.runs_per_day == 4
+
+
+def test_setting_a_schedule_does_not_fetch_there_and_then(scheduler):
+    """The two controls on the page do different things. One fetches now; the other says
+    when to fetch. A schedule that also fetched now blurred them, and on a site whose
+    payee is only reachable by confirming a deposit it raised a request nobody asked for."""
+    manager = FakeManager()
+    sched = scheduler(manager)
+
+    sched.start("melbet-bd", 60)
+
+    assert manager.started == []
+    assert sched.state.enabled is True
+    assert sched.seconds_until_next > 59 * 60

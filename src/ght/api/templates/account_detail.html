@@ -86,9 +86,9 @@
                alt="The deposit page showing {{ account.account_number }}">
         </a>
         <div class="shot-note">
-          Captured {{ screenshot.captured_at | stamp }} &middot; run #{{ screenshot.run_id }}
+          Captured {{ screenshot.captured_at | stamp }} &middot; fetch #{{ screenshot.run_id }}
           &middot; <span class="mono">sha256:{{ screenshot.sha256[:12] }}&hellip;</span>
-          &middot; {{ evidence_total }} page{{ "" if evidence_total == 1 else "s" }} stored for this account
+
         </div>
       {% else %}
         <div class="quiet-empty">No screenshot was captured on the fetches that saw this account.</div>

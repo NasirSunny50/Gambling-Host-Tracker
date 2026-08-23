@@ -404,7 +404,7 @@ Server-rendered pages over the collected data, bound to loopback.
 | Payees | One list of both kinds of payee, searchable and filterable, with CSV and PDF export |
 | Payee detail | The number, the holder, one screenshot of it on the site, and every sighting |
 | Fetches | Start an account fetch, set a schedule, and the paged history |
-| Fetch detail | When a fetch went, how long it took, what it brought back, what it stored |
+| Fetch detail | When a fetch went, how long it took, and which of the payees it brought back had never been seen before |
 | Components | The recurring interface elements and the reasoning behind them |
 
 A fetch is pointed at one site or at **All sites**, which walks the active ones one after
@@ -438,8 +438,9 @@ Storage is sharded by the first two hex characters of the digest so no directory
 unbounded. `ght verify-evidence` re-hashes stored blobs against their recorded digests and
 names any that no longer match.
 
-For each method a run reads, two artefacts are kept: the page the server returned, and a
-screenshot of it. The screenshot is the part a non-technical reviewer can actually read,
+For each method a fetch reads, two artefacts are kept: the page the server returned, and a
+screenshot of it. Neither is surfaced on the fetch page - what a reader acts on there is
+the payees - and the screenshot instead appears on the payee it belongs to. The screenshot is the part a non-technical reviewer can actually read,
 and for a name-only payee it is the whole of the evidence.
 
 ---

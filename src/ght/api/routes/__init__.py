@@ -628,19 +628,6 @@ def account_detail(account_id: int, request: Request, session: Session = Depends
         .where(AccountSite.account_id == account_id)
     ).all()
 
-    # How much is stored behind this account. The page shows one screenshot rather than the
-    # list - a reviewer wants to see the number on the site, not read digests - so this is
-    # only the count that says how much is on disk being hashed.
-    run_ids = {o.run_id for o in observations}
-    evidence_total = (
-        session.scalar(
-            select(func.count()).select_from(Evidence).where(Evidence.run_id.in_(run_ids))
-        )
-        or 0
-        if run_ids
-        else 0
-    )
-
     _log(session, request, "api_read", {"account_id": account_id}, 1)
     return templates.TemplateResponse(
         request,
@@ -650,7 +637,6 @@ def account_detail(account_id: int, request: Request, session: Session = Depends
             "account": account,
             "observations": observations,
             "sites": sites,
-            "evidence_total": evidence_total,
             "screenshot": _screenshot_for(session, account),
         },
     )
@@ -735,9 +721,6 @@ def runs(
         per_page=per_page,
     )
     sites = {s.id: s for s in session.scalars(select(Site))}
-    counts = dict(
-        session.execute(select(Evidence.run_id, func.count()).group_by(Evidence.run_id)).all()
-    )
 
     running = manager.is_running
     info = manager.current
@@ -776,7 +759,6 @@ def runs(
             "per": per_page,
             "page_sizes": PAGE_SIZES,
             "sites": sites,
-            "evidence_counts": counts,
             "runnable": _runnable_sites(),
             "job_running": running,
             "job_log": manager.log_tail if finished else [],
@@ -812,6 +794,48 @@ def _duration(start: datetime | None, end: datetime | None) -> str:
     return f"{minutes}m {seconds:02d}s" if minutes else f"{seconds}s"
 
 
+def _first_seen_in(session: Session, run_id: int) -> tuple[set[int], set[tuple]]:
+    """The payees this fetch was the first ever to see.
+
+    Asked of the sightings rather than of the fetch's own ``accounts_new`` counter: that
+    counter was written when the fetch ran and counts accounts only, while the question on
+    the page is which rows in front of the reader are new - name-only payees included.
+
+    A payee is new here if no earlier fetch ever recorded it. The comparison is by first
+    sighting, so re-reading history gives the same answer it gave on the day.
+    """
+    earliest_account = (
+        select(Observation.account_id, func.min(Observation.run_id).label("first_run"))
+        .group_by(Observation.account_id)
+        .subquery()
+    )
+    accounts = {
+        row[0]
+        for row in session.execute(
+            select(earliest_account.c.account_id).where(earliest_account.c.first_run == run_id)
+        )
+    }
+
+    earliest_merchant = (
+        select(
+            MerchantSighting.merchant_name.label("name"),
+            MerchantSighting.channel.label("channel"),
+            func.min(MerchantSighting.run_id).label("first_run"),
+        )
+        .group_by(MerchantSighting.merchant_name, MerchantSighting.channel)
+        .subquery()
+    )
+    merchants = {
+        (row[0], row[1])
+        for row in session.execute(
+            select(earliest_merchant.c.name, earliest_merchant.c.channel).where(
+                earliest_merchant.c.first_run == run_id
+            )
+        )
+    }
+    return accounts, merchants
+
+
 @router.get("/runs/{run_id}", response_class=HTMLResponse)
 def run_detail(run_id: int, request: Request, session: Session = Depends(get_session)):
     """One run: when it went, how it ended, what it brought back, what it stored.
@@ -829,18 +853,15 @@ def run_detail(run_id: int, request: Request, session: Session = Depends(get_ses
     # disagree with each other.
     payees = session.execute(_payee_query(None, None, run_id)).all()
 
-    evidence = session.scalars(
-        select(Evidence).where(Evidence.run_id == run_id).order_by(Evidence.id)
-    ).all()
-    # Grouped by the method that produced it: a run stores an HTML capture and a screenshot
-    # per probe, and the pair belongs together.
-    by_probe: dict[str, dict] = {}
-    for blob in evidence:
-        group = by_probe.setdefault(_probe_of(blob) or "-", {"html": None, "screenshot": None})
-        if blob.kind == "screenshot":
-            group["screenshot"] = blob
-        else:
-            group["html"] = blob
+    new_accounts, new_merchants = _first_seen_in(session, run_id)
+
+    def is_new(row) -> bool:
+        if row.kind == "account":
+            return row.id in new_accounts
+        return (row.name, row.channel) in new_merchants
+
+    # Counted off the same rows the list marks, so the figure and the marks cannot disagree.
+    new_count = sum(1 for row in payees if is_new(row))
 
     _log(session, request, "api_read", {"run_id": run_id}, len(payees))
     return templates.TemplateResponse(
@@ -852,8 +873,9 @@ def run_detail(run_id: int, request: Request, session: Session = Depends(get_ses
             "site": session.get(Site, run.site_id),
             "payees": payees,
             "duration": _duration(run.started_at, run.finished_at),
-            "probes": sorted(by_probe.items()),
-            "evidence_total": len(evidence),
+            "new_accounts": new_accounts,
+            "new_merchants": new_merchants,
+            "new_count": new_count,
         },
     )
 
