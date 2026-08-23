@@ -175,13 +175,16 @@
 
     /* ---- channel mark ----------------------------------------------------- */
     .ch { display:inline-flex; align-items:center; gap:7px; white-space:nowrap; }
-    .ch-mark { font-family:var(--mono); font-size:10px; font-weight:800; min-width:22px; height:17px;
-               padding:0 3px; border-radius:4px; display:inline-flex; align-items:center;
+    .ch-mark { font-family:var(--mono); font-size:11px; font-weight:800; min-width:27px; height:21px;
+               padding:0 4px; border-radius:4px; display:inline-flex; align-items:center;
                justify-content:center; color:#fff; background:var(--ch, var(--ch-neutral)); }
     .ch-label { font-size:13px; color:var(--text); }
-    /* A supplied brand logo sits where the lettered mark would, at the same size, so a
-       column of them stays aligned whether or not every channel has one. */
-    .ch-logo { width:22px; height:17px; object-fit:contain; flex:none; border-radius:3px; }
+    /* A supplied brand logo sits where the lettered mark would, in a box of its own, so a
+       column of them stays aligned whether or not every channel has one. The box is taller
+       than the mark and a little wider: the logos supplied are square app icons, which a
+       mark-shaped slot would shrink to the height of two letters, and a landscape wordmark
+       dropped in later still has the width to stay readable. */
+    .ch-logo { width:30px; height:24px; object-fit:contain; flex:none; border-radius:3px; }
     .ch-bkash{--ch:var(--ch-bkash);} .ch-nagad{--ch:var(--ch-nagad);}
     .ch-rocket{--ch:var(--ch-rocket);} .ch-upay{--ch:var(--ch-upay);}
     .ch-tap{--ch:var(--ch-tap);} .ch-mcash{--ch:var(--ch-mcash);}

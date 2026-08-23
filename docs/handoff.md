@@ -90,9 +90,12 @@ header, footer, provenance and page numbers; drawn icons throughout.
 
 ## Known open items
 
-- **No brand logos.** `data/branding/<channel>.svg` is wired up and empty on purpose —
-  bKash/Nagad/Upay own their marks and an approximation would be a counterfeit. Drop a
-  licensed file in and it appears everywhere; otherwise the lettered mark shows.
+- **Brand logos are local, not in git.** `data/branding/` is gitignored and ships empty —
+  bKash/Nagad/Upay own their marks and an approximation would be a counterfeit. This
+  machine has bKash, Nagad, Upay and Bank transfer dropped in, so the portal shows them;
+  a fresh clone shows the lettered mark until someone supplies files. Filenames are matched
+  loosely (case, spaces and hyphens), so a download goes in as-is. Rocket, Tap and mCash
+  have no file yet. The PDF export carries no logos, only the channel label.
 - **Bengali payee names in PDFs** need a Unicode font on the machine (Nirmala on Windows).
   Without one the report prints `?` rather than wrong glyphs. No Bengali names in the data
   yet, so this path is untested against real data.

@@ -163,13 +163,28 @@ BRANDING_DIR = REPO_ROOT / "data" / "branding"
 BRANDING_TYPES = {".svg": "image/svg+xml", ".png": "image/png", ".webp": "image/webp"}
 
 
+def _branding_key(name: str) -> str:
+    """Fold a name to compare it: case, spaces and hyphens all mean the same thing."""
+    return re.sub(r"[\s-]+", "_", name.strip().lower())
+
+
 def _branding_file(channel: str) -> Path | None:
-    """The logo file for a channel, if someone has supplied one."""
+    """The logo file for a channel, if someone has supplied one.
+
+    Matched on the folded name rather than the exact filename. A logo arrives named the
+    way the brand writes it - "Bank transfer.png", "bKash.png" - and asking whoever drops
+    it in to also rename it to the channel key is a step that only ever gets forgotten,
+    leaving a lettered mark beside a file that is sitting right there.
+    """
     if not channel or "/" in channel or "\\" in channel or "." in channel:
         return None
-    for suffix in BRANDING_TYPES:
-        candidate = BRANDING_DIR / f"{channel}{suffix}"
-        if candidate.is_file():
+    wanted = _branding_key(channel)
+    if not BRANDING_DIR.is_dir():
+        return None
+    for candidate in sorted(BRANDING_DIR.iterdir()):
+        if candidate.suffix.lower() not in BRANDING_TYPES:
+            continue
+        if candidate.is_file() and _branding_key(candidate.stem) == wanted:
             return candidate
     return None
 
@@ -188,7 +203,7 @@ def branding(channel: str):
     path = _branding_file(channel)
     if path is None:
         return HTMLResponse("<h1>404</h1><p>No logo for that channel.</p>", status_code=404)
-    return FileResponse(path, media_type=BRANDING_TYPES[path.suffix])
+    return FileResponse(path, media_type=BRANDING_TYPES[path.suffix.lower()])
 
 
 @router.get("/", response_class=HTMLResponse)
