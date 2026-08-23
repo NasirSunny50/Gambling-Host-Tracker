@@ -74,8 +74,10 @@ recurring UI elements and the reasoning (not linked in the nav).
 - **Payees** — one list of both kinds. Search + channel filter, per-page, CSV and PDF
   export. No status column, no confidence: the row says which site it came from.
 - **Detail** — one screenshot of the number on the site, plus the sightings.
-- **Runs** — manual card and schedule card side by side, then run history. The outcome card
-  after a run shows once and stands down on reload.
+- **Runs** — manual card and schedule card side by side, then paged run history. The
+  outcome card after a run shows once and stands down on reload. A row opens
+  `/runs/<id>`: when it went and how long it took, what it brought back, and the pages
+  it stored as evidence, one row per method.
 
 Dates are Bangladesh format and +06:00 everywhere (`_stamp` / `_day` in `api/routes`).
 

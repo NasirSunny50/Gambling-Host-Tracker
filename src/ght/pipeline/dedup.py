@@ -91,12 +91,18 @@ def record_observations(
     site_id: int,
     extracted_accounts: list[NormalizedAccount],
     page_url: str | None = None,
+    seen_at: datetime | None = None,
 ) -> tuple[list[int], list[int]]:
     """Persist one run's findings.
 
+    ``seen_at`` is when the pages were read. It defaults to the run's start, which is close
+    enough for a short run - but a run that waited on a person to sign in began minutes
+    before it saw anything, and an observation is a claim about when a number was on the
+    site rather than about when the collector woke up.
+
     Returns ``(account_ids_seen, account_ids_new)``.
     """
-    seen_at = run.started_at or utcnow()
+    seen_at = seen_at or run.started_at or utcnow()
     seen_ids: list[int] = []
     new_ids: list[int] = []
 

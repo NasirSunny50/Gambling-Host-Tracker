@@ -1,0 +1,184 @@
+{% extends "base.html" %}
+{% import "_macros.html" as ui %}
+{% set page = "runs" %}
+{% block title %}Run #{{ run.id }} — Host Tracker{% endblock %}
+{% block heading %}Run #{{ run.id }}{% endblock %}
+{% block subtitle %}What this collection did, and what it brought back{% endblock %}
+{% block body %}
+
+<p class="back"><a href="/runs">&lsaquo; Back to runs</a></p>
+
+<div class="detail">
+  <div class="col">
+    <section class="panel">
+      <div class="ident">
+        <div class="ident-site">{{ site.slug if site else run.site_id }}</div>
+        <div class="ident-when mono">{{ run.started_at | stamp }}</div>
+        <div class="ident-state">{{ ui.outcome_pill(run.status) }}</div>
+      </div>
+      <dl class="kv">
+        <div class="row"><dt>Started</dt><dd class="mono">{{ run.started_at | stamp }}</dd></div>
+        <div class="row"><dt>Finished</dt>
+          {# A run that never wrote a finish did not end - it was killed, or the machine
+             went down under it. Saying "unknown" is the truthful reading; a dash would
+             look like a run that took no time at all. #}
+          <dd class="mono">{% if run.finished_at %}{{ run.finished_at | stamp }}
+              {%- else %}{{ ui.unknown() }}{% endif %}</dd></div>
+        <div class="row"><dt>Took</dt>
+          <dd class="mono">{{ duration if duration else ui.unknown() }}</dd></div>
+        <div class="row"><dt>Site</dt><dd>{{ site.name if site else ui.unknown() }}</dd></div>
+        <div class="row"><dt>Fetcher</dt><dd class="mono">{{ run.fetcher }}</dd></div>
+        <div class="row"><dt>HTTP status</dt>
+          <dd class="mono">{{ run.http_status or ui.unknown() }}</dd></div>
+      </dl>
+    </section>
+
+    {% if run.url %}
+    <section class="panel">
+      <h2>Page it collected from</h2>
+      {# Credential-bearing query parameters are replaced with REDACTED when the capture is
+         taken, so this is safe to show and to hand on. #}
+      <div class="url mono">{{ run.url }}</div>
+    </section>
+    {% endif %}
+
+    {% if run.error %}
+    {# The note's colour follows the outcome, not the fact that there is a note. A healthy
+       run that reports "the site switched two methods off" is telling you about the site;
+       painting that red sends someone looking for a fault of ours that does not exist. #}
+    {% set tone = {"ok": "info", "partial": "warn"}.get(run.status, "bad") %}
+    <section class="panel">
+      <h2>What it reported</h2>
+      <div class="callout {{ tone }}">{{ run.error }}</div>
+      {% if run.status in ("ok", "partial") %}
+      <p class="why">
+        A method the site has switched off leaves the run healthy &mdash; nothing here is
+        broken and there is nothing to repair. A method that could not be
+        <em>read</em> means a selector no longer matches the page, which is a config fix.
+      </p>
+      {% endif %}
+    </section>
+    {% endif %}
+  </div>
+
+  <div class="col">
+    <div class="tiles">
+      <div class="tile">
+        <div class="tile-n mono">{{ payees | length }}</div>
+        <div class="tile-k">payees brought back</div>
+      </div>
+      <div class="tile">
+        <div class="tile-n mono" style="{{ 'color:var(--ok)' if run.accounts_new }}">{{ run.accounts_new }}</div>
+        <div class="tile-k">never seen before</div>
+      </div>
+      <div class="tile">
+        <div class="tile-n mono">{{ evidence_total }}</div>
+        <div class="tile-k">pages saved as evidence</div>
+      </div>
+    </div>
+
+    <section class="panel">
+      <h2>What it collected</h2>
+      {% if payees %}
+      {% call ui.table(["Channel", "Number", "Name", "Site"]) %}
+        {% for r in payees %}
+        <tr class="linked"
+            data-href="{{ ('/merchants/' if r.kind == 'merchant' else '/accounts/') ~ r.id }}">
+          <td>{{ ui.channel(r.channel) }}</td>
+          <td>{% if r.number %}{{ ui.number_text(r.id, r.number) }}{% else %}{{ ui.na() }}{% endif %}</td>
+          <td>{% if r.name %}{{ ui.copyable(r.name) }}
+              {%- elif r.kind == "merchant" %}{{ ui.na() }}{% else %}{{ ui.unknown() }}{% endif %}</td>
+          <td class="dim nowrap">{{ r.site or ui.unknown() }}</td>
+        </tr>
+        {% endfor %}
+      {% endcall %}
+      <div class="panel-foot">
+        <a class="btn" href="/payees?run={{ run.id }}">Open these in Payees &rarr;</a>
+      </div>
+      {% else %}
+      <div class="quiet-empty">
+        This run brought back no payee. A run can end that way honestly &mdash; the site
+        switches methods off for hours at a time &mdash; so the outcome above says whether
+        anything was actually wrong.
+      </div>
+      {% endif %}
+    </section>
+
+    <section class="panel">
+      <h2>Pages saved as evidence &mdash; {{ evidence_total }}</h2>
+      {# What the column on the runs table counts. Each method a run reads leaves the page
+         the server actually returned plus a picture of it, both hashed, so a number can be
+         shown later to have come from those exact bytes. #}
+      <p class="panel-note">
+        Every method this run read leaves the page the server returned and a picture of it,
+        each stored under the SHA-256 of its own bytes. That is what makes a collected
+        number defensible months later: the file can be re-hashed and shown to be the same
+        page the number was read from.
+      </p>
+      {% if probes %}
+      {% call ui.table(["Method", "Page", "Picture", "SHA-256 of the page"]) %}
+        {% for name, blobs in probes %}
+        <tr>
+          <td class="mono">{{ name }}</td>
+          <td class="dim mono nowrap">
+            {%- if blobs.html %}{{ (blobs.html.bytes / 1024) | round | int }} KB
+            {%- else %}{{ ui.na() }}{% endif -%}
+          </td>
+          <td>
+            {%- if blobs.screenshot %}
+            <a href="/evidence/{{ blobs.screenshot.id }}.png" target="_blank" rel="noopener">View</a>
+            {%- else %}{{ ui.na() }}{% endif -%}
+          </td>
+          <td class="dim mono">
+            {%- if blobs.html %}<span class="clip" title="{{ blobs.html.sha256 }}">{{ blobs.html.sha256[:16] }}&hellip;</span>
+            {%- else %}{{ ui.na() }}{% endif -%}
+          </td>
+        </tr>
+        {% endfor %}
+      {% endcall %}
+      {% else %}
+      <div class="quiet-empty">
+        Nothing was stored. A run that never reached a page has nothing to keep.
+      </div>
+      {% endif %}
+    </section>
+  </div>
+</div>
+
+<style>
+  .back { margin:0 0 14px; font-size:13px; }
+  .back a { color:var(--text-2); }
+  .detail { display:grid; grid-template-columns:1fr 1.5fr; gap:16px; align-items:start; }
+  .detail .col { display:flex; flex-direction:column; gap:16px; min-width:0; }
+  @media (max-width:1000px) { .detail { grid-template-columns:1fr; } }
+
+  .ident { padding:18px 16px; border-bottom:1px solid var(--border); }
+  .ident-site { font-size:18px; font-weight:700; letter-spacing:-.2px; margin-bottom:4px; }
+  .ident-when { font-size:12.5px; color:var(--text-3); margin-bottom:12px; }
+  .ident-state { display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+
+  .url { padding:12px 16px; font-size:12px; color:var(--text-2); word-break:break-all;
+         line-height:1.5; }
+
+  .tiles { display:grid; grid-template-columns:repeat(3, 1fr); gap:12px; }
+  .tile { background:var(--surface); border:1px solid var(--border); border-radius:10px;
+          padding:14px 16px; }
+  .tile-n { font-size:24px; font-weight:750; }
+  .tile-k { font-size:12px; color:var(--text-3); margin-top:2px; }
+  @media (max-width:560px) { .tiles { grid-template-columns:1fr; } }
+
+  .callout { margin:0; padding:12px 16px; font-size:13px; line-height:1.5; }
+  .callout.info { color:var(--info); background:var(--info-bg); }
+  .callout.warn { color:var(--warn); background:var(--warn-bg); }
+  .callout.bad { color:var(--danger); background:var(--danger-bg); }
+
+  .panel-note { margin:0; padding:12px 16px; font-size:12.5px; color:var(--text-2);
+                line-height:1.5; border-bottom:1px solid var(--border);
+                background:var(--surface-2); }
+  .panel-foot { padding:12px 16px; border-top:1px solid var(--border); }
+  .why { margin:0; padding:12px 16px; font-size:12.5px; color:var(--text-3); line-height:1.5; }
+  .quiet-empty { padding:28px 20px; color:var(--text-2); text-align:center; font-size:13px;
+                 line-height:1.5; }
+</style>
+
+{% endblock %}

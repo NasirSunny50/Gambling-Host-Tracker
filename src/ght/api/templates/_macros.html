@@ -144,10 +144,15 @@
 
 {# Table shell. Pass headers; a header starting with "#" is right-aligned numeric. The
    caller renders the <tr> rows, so the empty case lives with the data that knows its span. #}
+{# A header may carry its own explanation after a pipe: "Pages saved|what that means".
+   A column whose name only makes sense once someone explains it needs the explanation
+   attached to it, not left for the reader to ask about. #}
 {% macro table(headers) -%}
 <div class="scroll-x"><table>
   <thead><tr>
-  {%- for h in headers %}<th class="{{ 'num' if h.startswith('#') }}">{{ h.lstrip('#') }}</th>{% endfor -%}
+  {%- for h in headers %}{% set label, _sep, tip = h.partition("|") -%}
+  <th class="{{ 'num' if label.startswith('#') }}"{% if tip %} title="{{ tip }}"{% endif %}>{{ label.lstrip('#') }}</th>
+  {%- endfor -%}
   </tr></thead>
   <tbody>{{ caller() }}</tbody>
 </table></div>

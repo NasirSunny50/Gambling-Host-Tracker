@@ -782,6 +782,67 @@ def runs(
     )
 
 
+def _duration(start: datetime | None, end: datetime | None) -> str:
+    """How long a run took, or an honest blank when it never recorded an end.
+
+    A run killed mid-flight keeps its start and never gets a finish, and showing "0s" for
+    that would read as a run that did nothing rather than one nobody knows the end of.
+    """
+    if start is None or end is None:
+        return ""
+    seconds = int((end - start).total_seconds())
+    if seconds < 0:
+        return ""
+    minutes, seconds = divmod(seconds, 60)
+    return f"{minutes}m {seconds:02d}s" if minutes else f"{seconds}s"
+
+
+@router.get("/runs/{run_id}", response_class=HTMLResponse)
+def run_detail(run_id: int, request: Request, session: Session = Depends(get_session)):
+    """One run: when it went, how it ended, what it brought back, what it stored.
+
+    The history table answers "did it work"; this answers "what happened". Both matter,
+    and cramming the second into a row of the first is how the note column ended up
+    carrying a sentence nobody could read.
+    """
+    run = session.get(CollectionRun, run_id)
+    if run is None:
+        return HTMLResponse("<h1>404</h1><p>No such run.</p>", status_code=404)
+
+    # The payees this run actually brought back, read the same way the Payees page reads
+    # them - so the list here and the list behind "view what this run collected" cannot
+    # disagree with each other.
+    payees = session.execute(_payee_query(None, None, run_id)).all()
+
+    evidence = session.scalars(
+        select(Evidence).where(Evidence.run_id == run_id).order_by(Evidence.id)
+    ).all()
+    # Grouped by the method that produced it: a run stores an HTML capture and a screenshot
+    # per probe, and the pair belongs together.
+    by_probe: dict[str, dict] = {}
+    for blob in evidence:
+        group = by_probe.setdefault(_probe_of(blob) or "-", {"html": None, "screenshot": None})
+        if blob.kind == "screenshot":
+            group["screenshot"] = blob
+        else:
+            group["html"] = blob
+
+    _log(session, request, "api_read", {"run_id": run_id}, len(payees))
+    return templates.TemplateResponse(
+        request,
+        "run_detail.html",
+        {
+            "nav": _nav(session),
+            "run": run,
+            "site": session.get(Site, run.site_id),
+            "payees": payees,
+            "duration": _duration(run.started_at, run.finished_at),
+            "probes": sorted(by_probe.items()),
+            "evidence_total": len(evidence),
+        },
+    )
+
+
 @router.get("/components", response_class=HTMLResponse)
 def components(request: Request, session: Session = Depends(get_session)):
     """The recurring elements and why they read the way they do.

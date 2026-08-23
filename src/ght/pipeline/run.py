@@ -311,6 +311,11 @@ def run_site(
     on_progress: ProgressFn | None = None,
 ) -> RunReport:
     """Sign in, fetch, extract, and persist one site's deposit accounts."""
+    # When the run began, taken before any work rather than when the row gets written. The
+    # row cannot be created until the first capture has answered - it carries the URL and
+    # the outcome - and stamping it then recorded the *end* of collection as its start,
+    # which made every run in the history look instantaneous.
+    started_at = utcnow()
     site = sync_site(session, config)
 
     # Sign in before collecting rather than after failing. When the session is still good
@@ -344,7 +349,7 @@ def run_site(
         status=status,
         http_status=capture.status_code or None,
         error=capture.error,
-        started_at=utcnow(),
+        started_at=started_at,
     )
     session.add(run)
     session.flush()
@@ -537,7 +542,7 @@ def run_site(
         return report
 
     seen_ids, new_ids = record_observations(
-        session, run, site.id, result.accounts, page_url=capture.url
+        session, run, site.id, result.accounts, page_url=capture.url, seen_at=utcnow()
     )
     report.changes = compute_changeset(
         session, run, site.id, seen_ids, new_ids, complete=complete

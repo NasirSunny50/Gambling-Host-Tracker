@@ -16,9 +16,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from ght.api.routes import PAGE_SIZES, Page, templates
+from ght.api.routes import PAGE_SIZES, Page, _duration, templates
 
 NOW = datetime(2026, 8, 20, 18, 26, tzinfo=UTC)
+LATER = datetime(2026, 8, 20, 18, 27, 22, tzinfo=UTC)
 
 
 def render(name: str, **context) -> str:
@@ -60,6 +61,10 @@ def run_row(**kw):
         "accounts_new": 2,
         "error": None,
         "started_at": NOW,
+        "finished_at": LATER,
+        "url": "https://example.test/office/recharge",
+        "fetcher": "browser",
+        "http_status": 200,
     }
     return SimpleNamespace(**{**fields, **kw})
 
@@ -264,6 +269,81 @@ def test_detail_says_so_plainly_when_no_picture_was_captured():
         screenshot=None,
     )
     assert "No screenshot was captured" in html
+
+
+# ---------------------------------------------------------------- run detail
+
+
+def blob(**kw):
+    fields = {"id": 5, "run_id": 7, "kind": "html", "path": "1xbet-bd/upay/ab/abc.html",
+              "sha256": "b" * 64, "bytes": 51200, "captured_at": NOW}
+    return SimpleNamespace(**{**fields, **kw})
+
+
+def render_run_detail(**kw):
+    context = {
+        "run": run_row(),
+        "site": SimpleNamespace(slug="1xbet-bd", name="1xBet Bangladesh"),
+        "payees": [],
+        "duration": "1m 22s",
+        "probes": [],
+        "evidence_total": 0,
+    }
+    return render("run_detail.html", **{**context, **kw})
+
+
+def test_a_run_says_when_it_went_and_how_long_it_took():
+    html = render_run_detail(
+        probes=[("upay", {"html": blob(), "screenshot": blob(id=6, kind="screenshot")})],
+        evidence_total=2,
+    )
+    # Dhaka time, like every other timestamp in the portal.
+    assert "21/08/2026 12:26 AM" in html  # started
+    assert "21/08/2026 12:27 AM" in html  # finished
+    assert "1m 22s" in html
+    assert "upay" in html
+    assert "/evidence/6.png" in html
+
+
+def test_a_run_that_never_finished_does_not_claim_a_duration():
+    """A collection killed mid-flight has a start and no end. Reporting 0s would read as a
+    run that did nothing, which is a different thing from one nobody knows the end of."""
+    html = render_run_detail(run=run_row(finished_at=None), duration="")
+    assert "unknown" in html
+    assert "0s" not in html
+
+
+def test_a_healthy_run_with_a_note_is_not_painted_as_a_failure():
+    """The site switching a method off is news about the site, not a fault of ours."""
+    html = render_run_detail(
+        run=run_row(status="ok", error="1 method switched off by the site (nexus-pay)")
+    )
+    assert "callout info" in html
+    assert "callout bad" not in html
+
+
+def test_a_failed_run_is_not_dressed_in_the_healthy_colour():
+    html = render_run_detail(run=run_row(status="failed", error="Login session expired."))
+    assert "callout bad" in html
+
+
+def test_a_run_that_collected_nothing_says_that_can_be_honest():
+    html = render_run_detail(payees=[])
+    assert "brought back no payee" in html
+
+
+@pytest.mark.parametrize(
+    "start, end, expected",
+    [
+        (NOW, LATER, "1m 22s"),
+        (NOW, NOW, "0s"),
+        (NOW, None, ""),
+        (None, LATER, ""),
+        (LATER, NOW, ""),  # a clock that went backwards is not a negative duration
+    ],
+)
+def test_duration_reads_as_a_person_would_say_it(start, end, expected):
+    assert _duration(start, end) == expected
 
 
 # ----------------------------------------------------------------------- runs

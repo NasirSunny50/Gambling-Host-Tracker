@@ -210,9 +210,14 @@
 
 <section class="panel" style="margin-top:20px">
   <h2>Run history</h2>
-  {% call ui.table(["Started", "Site", "Outcome", "#Found", "#New", "#Pages saved", "Note"]) %}
+  {% call ui.table([
+      "Started", "Site", "Outcome",
+      "#Found|Payees this run brought back: de-duplicated accounts plus name-only payees",
+      "#New|Accounts in that count which had never been seen on any run before",
+      "#Pages saved|Copies kept as evidence: the page each method returned plus a picture of it, both hashed",
+      "Note", ""]) %}
     {% for r in rows %}
-    <tr>
+    <tr class="linked" data-href="/runs/{{ r.id }}">
       <td class="dim mono nowrap">{{ r.started_at | stamp }}</td>
       <td class="dim nowrap">{{ sites[r.site_id].slug if r.site_id in sites else r.site_id }}</td>
       <td>{{ ui.outcome_pill(r.status) }}</td>
@@ -222,9 +227,10 @@
       <td class="{{ 'dim' if r.error else 'mute' }} note">
         {%- if r.error %}<span title="{{ r.error }}">{{ r.error }}</span>{% else %}&mdash;{% endif -%}
       </td>
+      <td class="nowrap"><a href="/runs/{{ r.id }}">Details &rsaquo;</a></td>
     </tr>
     {% else %}
-    <tr><td colspan="7">
+    <tr><td colspan="8">
       <div class="quiet-empty">No runs yet. Once you start collecting, every run is logged
         here with its outcome and how many pages it saved.</div>
     </td></tr>
