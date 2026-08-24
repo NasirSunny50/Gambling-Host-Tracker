@@ -83,41 +83,17 @@ logged_out_marker: registration-layout-widget
 # A dead session redirects the account page to /en/user/login.
 logged_out_url: /user/login
 
+# The in-modal e-wallets (Bkash, Upay, Bkash Free, Upay Free, The Local Nagad, and any new
+# module the operator spins up under one of those names) are no longer named one by one.
+# They are found by `discover` below, which walks the E-wallets section and reads every cell
+# whose name carries a channel word - so a rename or an addition is collected without a
+# config edit, which is exactly what these operators keep doing. Only the two methods a
+# discovery cannot handle stay explicit probes: Internet Banking, whose name carries no
+# channel word, and the two paykassma redirects, whose payee is a name reached only by
+# confirming a deposit (which a discovery never does).
 probes:
-  # Each method reveals its payee only while its own modal is open, so each needs its
-  # own visit. The markup differs per method - some print the number in a <b>, others
-  # in .modal-message-address - which is why the selectors live per probe.
-  - name: bkash-bt3
-    flow:
-      - click: '.payment-cell[data-method="bt_bangladesh_default"]'
-        wait_for: ".payment_modal_input--html"
-    wait_for: ".payment_modal_input--html"
-    blocks:
-      - channel: bkash
-        container: ".payment_modal_row"
-        value: ".payment_modal_input--html"
-        holder: ".modal-message-address"
-
-  - name: upay
-    flow:
-      - click: '.payment-cell[data-method="upay_bangla"]'
-        wait_for: ".payment_modal_input--html"
-    wait_for: ".payment_modal_input--html"
-    blocks:
-      - channel: upay
-        container: ".payment_modal_row"
-        value: ".modal-message-address"
-
-  - name: bkash-free
-    flow:
-      - click: '.payment-cell[data-method="bkash_free"]'
-        wait_for: ".payment_modal_input--html"
-    wait_for: ".payment_modal_input--html"
-    blocks:
-      - channel: bkash
-        container: ".payment_modal_body"
-        value: ".modal-message-address"
-
+  # Internet Banking. The panel is Nexus Pay - Dutch-Bangla Bank's own wallet - so the
+  # number is a wallet id and the bank is named here rather than read off the page.
   - name: nexus-pay
     flow:
       - click: '.payment-cell[data-method="internet_banking"]'
@@ -145,6 +121,53 @@ probes:
       - click: "#deposit_button"
     wait_for: ".merchant-name"
     merchant: ".merchant-name"
+
+  # LightSpeed Bkash is the other paykassma2 redirect, the bKash twin of Fast Nagad. Same
+  # shape: open the modal, confirm, land on the provider's checkout that names a merchant.
+  # Same cost, too - a real deposit order per walk - so it is creates_order and only runs
+  # when the operator has agreed to it. The destination selector is modelled on Fast Nagad
+  # and wants a live check the first time it runs.
+  - name: lightspeed-bkash
+    channel: bkash
+    creates_order: true
+    flow:
+      - click: '.payment-cell[data-method="bkash_p2p_webdef"]'
+        wait_for: "#deposit_button"
+      - click: "#deposit_button"
+    wait_for: ".merchant-name"
+    merchant: ".merchant-name"
+
+# Found and walked at run time rather than named. See the block comment on `probes`.
+discover:
+  # Every E-wallets cell that is a bKash / Nagad / Upay under any name. Scoped to the
+  # E-wallets section so the recommended duplicates and the crypto list are left alone. The
+  # channel is read from whichever word the name carries. Opening the modal is all this
+  # does - the paykassma redirects (Fast Nagad, LightSpeed Bkash) show no number here and
+  # yield nothing, which is right: their names come from the explicit probes above.
+  - name: e-wallet
+    kind: cells
+    items: '.section-block:has(.section_name_title:has-text("E-wallets")) .payment-cell'
+    label: ".payment-cell-name__caption--is-title"
+    match: [bkash, nagad, upay]
+    wait_for: ".modal-payment.active .payment_modal_input--html, .modal-payment.active .modal-message-address"
+    container: ".modal-payment.active"
+    value: ".modal-payment.active .payment_modal_input--html, .modal-payment.active .modal-message-address"
+
+  # Bank Transfer lists its recipient banks in a dropdown. Walk every option rather than
+  # naming the banks, so a bank added or dropped is picked up on the next run. Each option
+  # fills the modal in place with that bank's account, and the option label is the bank.
+  # The exact select/value selectors are modelled on the sister site and want a live check.
+  - name: bank
+    kind: options
+    channel: bank_transfer
+    open:
+      - click: '.section-block:has(.section_name_title:has-text("Bank transfer")) .payment-cell[data-method="bt_bangla"]'
+        wait_for: ".modal-payment.active select"
+    items: ".modal-payment.active select"
+    skip_options: ["", "Select recipient's bank", "Select"]
+    wait_for: ".modal-payment.active .modal-message-address"
+    container: ".modal-payment.active"
+    value: ".modal-payment.active .modal-message-address"
 
 ignore_numbers: []
 
@@ -208,3 +231,27 @@ notes: |
   Dutch-Bangla Bank Limited / IFIC / Islami Bank Bangladesh Limited in place of
   AB Bank / DBBL BANK / EBL BANK / Premier Bank. Those option labels are the site's own
   wording and will drift again; a mismatch now fails fast and names the current options.
+
+  2026-08-24: reworked from a fixed probe list to discovery, off the captured method grid
+  of run 182. The panel groups its cells under section headers (Recommended, E-wallets,
+  Internet banking, Bank transfer, Cryptocurrency), each an unlabelled `.section-block`
+  whose only handle is its `.section_name_title` text - hence the `:has-text(...)` scoping.
+  The E-wallets section then held: Fast Nagad, LightSpeed Bkash (both paykassma2), The
+  Local Nagad (wallet_nagad_bdt_1_new, interkassa2), Bkash, Upay, Bkash Free (bt3), AIRTM,
+  Upay Free (upay_free_bdt, bt3), MoneyGo, BinancePay.
+
+  Why discovery: the operator keeps adding e-wallet modules under new ids but familiar
+  names, and a fixed list only ever sees yesterday's. `discover: e-wallet` walks every
+  E-wallets cell whose name carries bkash / nagad / upay and reads its modal, so Upay Free
+  and The Local Nagad are collected without being named, and the next new "<brand> X" is
+  too. Extraction of the bt3 modal was checked offline against run 182's captured Bkash
+  panel (number in `.payment_modal_input--html`, sometimes `.modal-message-address`).
+
+  Still wants a live check the first time it runs (all modelled, none seen live yet):
+    - `discover: bank` — the Bank Transfer dropdown. `bt_bangla` is back in the list; the
+      select selector (`.modal-payment.active select`), the placeholder to skip, and the
+      value/holder rows are modelled on the sister site's panel, not yet confirmed here.
+    - `lightspeed-bkash` — its redirect destination selector is copied from `fast-nagad`.
+      creates_order, so it only runs when the operator agrees.
+    - The Local Nagad (interkassa2) — never walked before; its modal may print a number or
+      may redirect. If it redirects it simply yields nothing here, which is safe.

@@ -54,7 +54,14 @@ Portal → **Fetches** → *Fetch accounts now*, or on a schedule. One fetch:
 2. **Walks every probe inside one loaded panel** — the panel takes 10–13s to start and every
    probe needs the same one, so it is opened once. Between probes the modal is closed and
    *proven* closed (`reset:` in the yaml); anything less reloads.
-3. **Saves** accounts, name-only payees, and evidence (HTML + screenshot, SHA-256).
+3. **Runs any discoveries** on that same panel (`discover:` in the yaml) — families of
+   methods found at run time rather than named: every E-wallets cell whose name carries a
+   channel word (so new bKash/Nagad/Upay modules are collected without a config edit), and
+   every option of the Bank Transfer dropdown. A discovery only opens a modal, never
+   confirms, so it can never start an order. 1xBet uses both; see `docs/architecture.md`
+   §6.2. The 1xBet `discover: bank` and `lightspeed-bkash` selectors are modelled, not yet
+   seen live — the notes in the yaml say what to confirm on the first run.
+4. **Saves** accounts, name-only payees, and evidence (HTML + screenshot, SHA-256).
 
 1xBet takes ~80s. Melbet takes seven or eight minutes, almost all of it waiting out refused
 connections (see below). Live progress streams from the subprocess (`ght/progress.py`,

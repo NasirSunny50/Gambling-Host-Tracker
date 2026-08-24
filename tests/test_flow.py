@@ -1140,3 +1140,281 @@ def test_a_probe_that_confirms_a_deposit_still_gets_the_long_budget():
     page = StillPage()
     assert fetcher._await_navigation(page, page.url) is False
     assert page.waited >= BrowserFetcher.NAV_BUDGET_MS - 300
+
+
+# =========================================================== discovery: cells and options
+
+
+class _Text:
+    def __init__(self, text):
+        self._t = text
+
+    def inner_text(self):
+        return self._t
+
+
+class _Shown:
+    def is_visible(self):
+        return True
+
+
+class _Cell:
+    def __init__(self, label, method):
+        self.label = label
+        self.method = method
+
+    def query_selector(self, _sel):
+        return _Text(self.label)
+
+    def get_attribute(self, name):
+        return self.method if name == "data-method" else None
+
+    def click(self, timeout=None):
+        pass
+
+
+class _Option:
+    def __init__(self, value, label):
+        self.value = value
+        self.label = label
+
+    def get_attribute(self, name):
+        return self.value if name == "value" else None
+
+    def inner_text(self):
+        return self.label
+
+
+class _Select:
+    def __init__(self, options):
+        self._options = options
+
+    def query_selector_all(self, _sel):
+        return self._options
+
+    def is_visible(self):
+        return True
+
+
+GONE = ".modal-payment--is-open"
+
+
+class DiscoveryPanel:
+    """A stand-in panel that answers the queries a discovery makes, no browser involved."""
+
+    url = "https://bd.1xbet.com/paysystems/deposit/"
+
+    def __init__(self, cells=None, options=None):
+        self._cells = cells or []
+        self._options = options or []
+        self.opened = []
+        self.selected = []
+
+    def query_selector_all(self, selector):
+        if "option" in selector:
+            return self._options
+        return list(self._cells)
+
+    def query_selector(self, selector):
+        if selector == GONE:  # the reset's "is a modal open?" check — nothing is
+            return None
+        if "select" in selector:
+            return _Select(self._options)
+        if 'data-method="' in selector:
+            method = selector.split('data-method="', 1)[1].split('"', 1)[0]
+            for cell in self._cells:
+                if cell.method == method:
+                    self.opened.append(method)
+                    return cell
+            return None
+        return _Shown()
+
+    def select_option(self, selector, value=None, force=False, timeout=None):
+        self.selected.append(value)
+
+    def wait_for_selector(self, selector, timeout=None, state=None):
+        pass
+
+    def wait_for_timeout(self, ms):
+        pass
+
+    def click(self, selector, timeout=None):
+        self.opened.append(selector)
+
+    def content(self):
+        return "<html><body>modal</body></html>"
+
+
+def _discovery_fetcher():
+    from ght.sources import Reset
+
+    return BrowserFetcher(
+        screenshot=False,
+        frame=None,
+        reset=Reset(click=".modal-payment__close", gone=GONE),
+    )
+
+
+def _cells_discovery(**over):
+    from ght.sources import Discovery
+
+    base = {
+        "name": "e-wallet",
+        "kind": "cells",
+        "items": ".section .payment-cell",
+        "label": ".title",
+        "match": ["bkash", "nagad", "upay"],
+        "wait_for": ".modal-payment.active .value",
+        "container": ".modal-payment.active",
+        "value": ".modal-payment.active .value",
+    }
+    base.update(over)
+    return Discovery(**base)
+
+
+def test_a_cells_discovery_walks_only_the_names_that_carry_a_channel_word():
+    """The whole point: a module named "The Local Nagad" or "Upay Free" is walked without
+    ever being written down, while AIRTM beside it is left alone."""
+    panel = DiscoveryPanel(
+        cells=[
+            _Cell("Bkash", "bt_bangladesh_default"),
+            _Cell("AIRTM", "airtm"),
+            _Cell("The Local Nagad", "wallet_nagad_bdt_1_new"),
+            _Cell("Upay Free", "upay_free_bdt"),
+        ]
+    )
+    found = _discovery_fetcher()._discover_cells(panel, ["https://x/"], _cells_discovery())
+
+    assert [f.name for f in found] == [
+        "e-wallet: Bkash",
+        "e-wallet: The Local Nagad",
+        "e-wallet: Upay Free",
+    ]
+    assert [f.channel for f in found] == ["bkash", "nagad", "upay"]
+    # AIRTM's cell was never opened.
+    assert "airtm" not in panel.opened
+    # Each match carries the selectors the pipeline reads it by.
+    assert found[0].value == ".modal-payment.active .value"
+
+
+def test_a_cells_discovery_can_pin_one_channel_instead_of_reading_it():
+    panel = DiscoveryPanel(cells=[_Cell("Some Bank Wallet", "bankx")])
+    disc = _cells_discovery(match=[], channel="bank_transfer")
+    found = _discovery_fetcher()._discover_cells(panel, ["https://x/"], disc)
+    assert [f.channel for f in found] == ["bank_transfer"]
+
+
+def test_an_options_discovery_walks_every_bank_and_names_it():
+    from ght.sources import Discovery, Step
+
+    panel = DiscoveryPanel(
+        options=[
+            _Option("", "Select recipient's bank"),
+            _Option("dbbl", "Dutch-Bangla Bank Limited"),
+            _Option("ific", "IFIC Bank"),
+        ]
+    )
+    disc = Discovery(
+        name="bank",
+        kind="options",
+        channel="bank_transfer",
+        open=[Step(click=".payment-cell", wait_for=".modal-payment.active select")],
+        items=".modal-payment.active select",
+        skip_options=["", "Select recipient's bank"],
+        wait_for=".modal-payment.active .value",
+        container=".modal-payment.active",
+        value=".modal-payment.active .value",
+    )
+    found = _discovery_fetcher()._discover_options(panel, disc)
+
+    assert [f.bank_name for f in found] == ["Dutch-Bangla Bank Limited", "IFIC Bank"]
+    assert all(f.channel == "bank_transfer" for f in found)
+    # The placeholder was skipped, the two real banks were selected.
+    assert panel.selected == ["dbbl", "ific"]
+
+
+def test_infer_channel_prefers_a_fixed_channel_over_the_name():
+    disc = _cells_discovery(match=["bkash"], channel="nagad")
+    assert _discovery_fetcher()._infer_channel("Some Bkash Thing", disc) == "nagad"
+
+
+def test_a_discovered_capture_extracts_like_a_probe(tmp_path):
+    """End to end on real markup: a discovered bKash modal yields the bKash number, proving
+    the run-time-built block reads the page the same way a hand-written probe would."""
+    from ght.fetchers.browser import Discovered
+    from ght.pipeline.run import _discovered_capture
+    from ght.types import RawCapture
+
+    modal = (
+        "<html><body><div class='modal-payment active'>"
+        "<div class='payment_modal_input--html'>01969660877</div>"
+        "<div class='modal-message-address'>SHOP NAME</div>"
+        "</div></body></html>"
+    )
+    config = SourceConfig(
+        slug="1xbet-bd",
+        name="x",
+        fetcher="browser",
+        urls=[SourceUrl(url="https://x.invalid/")],
+    )
+    found = Discovered(
+        name="e-wallet: Bkash",
+        channel="bkash",
+        capture=RawCapture(url="https://x/", status_code=200, html=modal),
+        value=".modal-payment.active .payment_modal_input--html, .modal-payment.active .modal-message-address",
+        container=".modal-payment.active",
+    )
+    probe, probe_config, capture = _discovered_capture(config, found)
+    assert probe.name == "e-wallet: Bkash"
+    account = extract(capture.html, probe_config).accounts[0]
+    assert account.channel == "bkash"
+    assert account.account_number == "+8801969660877"
+
+
+# ---------------------------------------------------- discovery config is checked at load
+
+
+def test_a_cells_discovery_without_a_label_is_rejected():
+    from ght.sources import Discovery
+
+    with pytest.raises(ValidationError):
+        Discovery(name="x", kind="cells", items=".cell", match=["bkash"], value=".v")
+
+
+def test_a_cells_discovery_match_must_be_a_channel():
+    from ght.sources import Discovery
+
+    with pytest.raises(ValidationError):
+        Discovery(name="x", kind="cells", items=".cell", label=".t", match=["paytm"], value=".v")
+
+
+def test_an_options_discovery_needs_a_channel():
+    from ght.sources import Discovery
+
+    with pytest.raises(ValidationError):
+        Discovery(name="x", kind="options", items="select", value=".v")
+
+
+def test_an_unknown_discovery_kind_is_rejected():
+    from ght.sources import Discovery
+
+    with pytest.raises(ValidationError):
+        Discovery(name="x", kind="both", items=".cell", label=".t", match=["bkash"], value=".v")
+
+
+def test_discover_requires_a_reset_to_share_the_panel():
+    from ght.sources import Discovery
+
+    with pytest.raises(ValidationError):
+        SourceConfig(
+            slug="s",
+            name="s",
+            fetcher="browser",
+            urls=[SourceUrl(url="https://x.invalid/")],
+            discover=[
+                Discovery(
+                    name="e", kind="cells", items=".cell", label=".t",
+                    match=["bkash"], value=".v",
+                )
+            ],
+        )

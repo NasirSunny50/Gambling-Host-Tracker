@@ -11,6 +11,7 @@ non-technical reviewer can actually read.
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
@@ -18,6 +19,27 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from ght.config import settings
 from ght.sources import Step
 from ght.types import RawCapture
+
+
+@dataclass
+class Discovered:
+    """One method or dropdown option a discovery turned up at run time.
+
+    It carries the attribution the fetcher worked out - the channel a cell's name implies,
+    or the bank an option names - so the pipeline can build the block that reads it without
+    the config having named the method in advance.
+    """
+
+    name: str
+    channel: str
+    capture: RawCapture
+    bank_name: str | None = None
+    # The selectors that read this capture, carried from the discovery so the pipeline can
+    # build the extraction block without having named the method in advance.
+    value: str = ""
+    container: str | None = None
+    holder: str | None = None
+    account_type: str | None = None
 
 # Query parameters that carry a live credential. Embedded payment apps routinely take a
 # short-lived JWT in the URL, and that URL is stored on the run and shown in exports - so
@@ -481,8 +503,8 @@ class BrowserFetcher:
                 return frame
         return page
 
-    def fetch_many(self, urls: list[str], plans: list) -> list:
-        """Walk several probes inside one loaded panel.
+    def fetch_many(self, urls: list[str], plans: list, discoveries: list | None = None):
+        """Walk several probes, and any discoveries, inside one loaded panel.
 
         Every probe needs the same method list, and the embedded panel takes ten to
         thirteen seconds to start each time it is loaded - which was the bulk of a run
@@ -492,14 +514,20 @@ class BrowserFetcher:
         Each returned capture still stands alone: its own HTML, its own screenshot, its own
         flow error. Whenever the panel cannot be proven clean between probes it is reloaded,
         so sharing it can cost time but cannot mix one method's payee up with another's.
+
+        Returns ``(plan_captures, discovered)`` - the captures aligned to ``plans``, and a
+        list of :class:`Discovered`, one per method or dropdown option the discoveries
+        turned up at run time.
         """
+        discoveries = discoveries or []
         try:
             from playwright.sync_api import sync_playwright
         except ImportError:
-            return [self._no_playwright(urls[0] if urls else "") for _ in plans]
+            return [self._no_playwright(urls[0] if urls else "") for _ in plans], []
 
         auth_kwargs, auth_warning = self._auth_kwargs()
         captures: list = []
+        discovered: list = []
         try:
             with sync_playwright() as playwright:
                 browser = self._launch(playwright)
@@ -513,21 +541,18 @@ class BrowserFetcher:
                 response = None
                 landing = urls[0] if urls else ""
                 needs_load = True
+                aborted = False
                 last_html: str | None = None
 
                 for index, plan in enumerate(plans):
                     if needs_load:
-                        response = None
-                        for url in urls:
-                            response, _ = self._goto(page, url)
-                            if response is not None:
-                                landing = url
-                                break
+                        response, landing = self._load_any(page, urls)
                         if response is None:
                             captures.extend(
                                 self._failed(landing, "no configured url could be loaded")
                                 for _ in plans[index:]
                             )
+                            aborted = True
                             break
                         needs_load = False
                         # One look after the load, before walking anything: a refused
@@ -538,6 +563,7 @@ class BrowserFetcher:
                                 self._failed(landing, "session expired", flow_error="LOGGED_OUT")
                                 for _ in plans[index:]
                             )
+                            aborted = True
                             break
 
                     # The probe's own flow and completion marker for this pass.
@@ -553,9 +579,10 @@ class BrowserFetcher:
                         captures.extend(
                             self._failed(landing, "session expired") for _ in plans[index + 1 :]
                         )
+                        aborted = True
                         break
 
-                    if index + 1 < len(plans):
+                    if index + 1 < len(plans) or discoveries:
                         # A probe that navigates out of the panel leaves nothing to reset.
                         moved = plan.ends_navigation or (landing not in (page.url or ""))
                         # The modal belongs to the embedded panel, not to the page around
@@ -563,6 +590,17 @@ class BrowserFetcher:
                         # the old one open over the next method's click - which the site
                         # then answered with its "undefined" modal for every method.
                         needs_load = moved or not self._reset_panel(self._open_frame(page))
+
+                # Discoveries run on the same panel, after the fixed probes. A dead session
+                # or a site that never loaded is not something they can walk into.
+                if discoveries and not aborted:
+                    if needs_load:
+                        response, landing = self._load_any(page, urls)
+                    if response is not None and not self._session_refused_within(
+                        page, self.REFUSAL_GRACE_MS
+                    ):
+                        discovered = self._run_discoveries(page, urls, discoveries)
+                        last_html = discovered[-1].capture.html if discovered else last_html
 
                 self._refresh_session(context, page, last_html, None)
                 context.close()
@@ -572,7 +610,185 @@ class BrowserFetcher:
                 self._failed(urls[0] if urls else "", f"{type(exc).__name__}: {exc}")
                 for _ in plans[len(captures) :]
             )
-        return captures
+        return captures, discovered
+
+    def _load_any(self, page, urls: list[str]):
+        """Load the first URL that answers; returns ``(response, landing_url)``."""
+        for url in urls:
+            response, _ = self._goto(page, url)
+            if response is not None:
+                return response, url
+        return None, (urls[0] if urls else "")
+
+    # ------------------------------------------------------------ discovery
+
+    def _run_discoveries(self, page, urls: list[str], discoveries: list) -> list:
+        """Walk every discovery on the loaded panel, one after another."""
+        out: list = []
+        for disc in discoveries:
+            # Each discovery starts from the method list, the same as a probe does.
+            if not self._reset_panel(self._open_frame(page)):
+                self._load_any(page, urls)
+            if disc.kind == "cells":
+                out.extend(self._discover_cells(page, urls, disc))
+            else:
+                out.extend(self._discover_options(page, disc))
+        return out
+
+    def _infer_channel(self, label: str, disc) -> str | None:
+        """The channel a discovered cell belongs to - fixed, or read from its name."""
+        if disc.channel:
+            return disc.channel
+        low = label.lower()
+        for word in disc.match:
+            if word.lower() in low:
+                return word
+        return None
+
+    def _discover_cells(self, page, urls: list[str], disc) -> list:
+        """Find every method cell whose name carries a channel word, and read each one.
+
+        Only the modal is opened - never a deposit confirmed - so this cannot start an
+        order however a new module is wired. A cell that reveals its payee only after a
+        redirect simply shows no number here and yields nothing, which is correct: its name
+        is collected by an explicit probe that accepts the order, or not at all.
+        """
+        frame = self._open_frame(page)
+        targets = []
+        try:
+            cells = frame.query_selector_all(disc.items)
+        except Exception:  # noqa: BLE001 - a panel we cannot read yields no discoveries
+            return []
+        for cell in cells:
+            try:
+                label_el = cell.query_selector(disc.label)
+                label = (label_el.inner_text().strip() if label_el else "")
+                key = cell.get_attribute(disc.key_attr) or ""
+            except Exception:  # noqa: BLE001, S112 - skip a cell we cannot read
+                continue
+            channel = self._infer_channel(label, disc)
+            if channel and key:
+                targets.append((label, key, channel))
+
+        out = []
+        for position, (label, key, channel) in enumerate(targets):
+            selector = f'{disc.items}[{disc.key_attr}="{key}"]'
+            capture = self._open_and_snapshot(page, selector, disc.wait_for)
+            out.append(self._as_discovered(disc, f"{disc.name}: {label}", channel, capture))
+            if position + 1 < len(targets) and not self._reset_panel(self._open_frame(page)):
+                self._load_any(page, urls)
+        return out
+
+    def _discover_options(self, page, disc) -> list:
+        """Walk every option of a dropdown - Bank Transfer's recipient-bank list.
+
+        The bank names are read off the option labels rather than named in config, so a
+        bank added or dropped is picked up on the next run instead of at the next hand-fix.
+        """
+        frame = self._open_frame(page)
+        self.flow = disc.open
+        self._unavailable_hit = None
+        open_error = self._walk(frame, page)
+        frame = self._open_frame(page)
+        if open_error:
+            return [
+                self._as_discovered(
+                    disc,
+                    f"{disc.name}: (could not open)",
+                    disc.channel,
+                    self._failed(page.url, open_error, flow_error=open_error),
+                )
+            ]
+        try:
+            select = frame.query_selector(disc.items)
+            options = select.query_selector_all("option") if select else []
+            descriptors = []
+            for option in options:
+                value = option.get_attribute("value") or ""
+                label = (option.inner_text() or "").strip()
+                if value and not self._skip_option(label, value, disc):
+                    descriptors.append((value, label))
+        except Exception:  # noqa: BLE001 - an unreadable dropdown yields no discoveries
+            return []
+
+        out = []
+        for value, label in descriptors:
+            try:
+                frame.select_option(disc.items, value=value, force=True, timeout=self.flow_timeout)
+                if disc.wait_for:
+                    frame.wait_for_selector(disc.wait_for, timeout=self.flow_timeout)
+                capture = self._snapshot(page, frame)
+            except Exception as exc:  # noqa: BLE001 - a broken option is a reportable result
+                capture = self._failed(
+                    page.url, f"selecting {label!r} failed: {type(exc).__name__}"
+                )
+            out.append(
+                self._as_discovered(
+                    disc, f"{disc.name}: {label}", disc.channel, capture, bank_name=label
+                )
+            )
+        return out
+
+    @staticmethod
+    def _as_discovered(disc, name, channel, capture, bank_name=None):
+        """Package a capture with the attribution and selectors the pipeline reads it by."""
+        return Discovered(
+            name=name,
+            channel=channel,
+            capture=capture,
+            bank_name=bank_name,
+            value=disc.value,
+            container=disc.container,
+            holder=disc.holder,
+            account_type=disc.account_type,
+        )
+
+    @staticmethod
+    def _skip_option(label: str, value: str, disc) -> bool:
+        """Whether a dropdown option is the placeholder rather than a real choice.
+
+        The empty-string entry means "skip the option whose value is empty" - the usual
+        shape of a "choose a bank" placeholder - and must match by value only. Left as a
+        substring test it would match every label, since "" is inside any string, and skip
+        the whole dropdown.
+        """
+        for skip in disc.skip_options:
+            if skip == value:
+                return True
+            if skip and skip.lower() in label.lower():
+                return True
+        return False
+
+    def _open_and_snapshot(self, page, selector: str, wait_for: str | None):
+        """Click a method cell, wait for its modal, and capture what it shows."""
+        frame = self._open_frame(page)
+        self._unavailable_hit = None
+        try:
+            cell = frame.query_selector(selector)
+            if cell is None:
+                return self._failed(page.url, f"cell {selector!r} was gone", flow_error="no cell")
+            cell.click(timeout=self.flow_timeout)
+            if wait_for:
+                self._wait_for_either(frame, wait_for)
+        except Exception as exc:  # noqa: BLE001 - a broken open is a reportable result
+            return self._failed(
+                page.url, f"opening {selector!r} failed: {type(exc).__name__}", flow_error="open"
+            )
+        return self._snapshot(page, self._open_frame(page))
+
+    def _snapshot(self, page, frame):
+        """A capture of the modal as it stands now: its HTML, its picture, its state."""
+        html, read_error = _read_html(frame, page)
+        return RawCapture(
+            url=redact_url(getattr(frame, "url", "") or page.url or ""),
+            status_code=200,
+            html=html,
+            screenshot=self._shoot(page, frame),
+            fetcher=self.name,
+            fetched_at=datetime.now(UTC),
+            flow_error=read_error,
+            unavailable=self._unavailable_hit,
+        )
 
     def _failed(self, url: str, error: str, flow_error: str | None = None):
         return RawCapture(

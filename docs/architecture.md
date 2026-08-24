@@ -197,7 +197,9 @@ One fetch against one site proceeds in six stages.
 
 **2. Walk the probes.** A site is configured as a list of probes, one per payment method.
 Each probe has its own click flow and its own selectors, because the markup differs per
-method. Where the site allows it, every probe is walked inside a single loaded panel.
+method. Where the site allows it, every probe is walked inside a single loaded panel. A
+site may also declare **discoveries** — families of methods found and walked at run time
+rather than named one by one (section 6.2).
 
 **3. Store evidence.** The bytes the server returned, plus a screenshot, written under the
 SHA-256 of their own content — *before* extraction, so that a page which later turns out to
@@ -224,6 +226,30 @@ being broken. Where the reset cannot be proven, the panel is reloaded; sharing i
 time but cannot mix one method's payee up with another's.
 
 The same five methods now take 76 seconds.
+
+### 6.2 Discovery: methods found at run time
+
+A probe pins one method by its selector. A **discovery** instead enumerates whatever the
+panel is showing right now and walks each match, on the same loaded panel, after the
+probes. It exists because these operators drift in two ways a fixed list cannot follow:
+
+- **New modules under familiar names.** They spin up e-wallet modules under fresh ids
+  constantly — "The Local Nagad", "Upay Free", tomorrow's "Super Bkash" — all still bKash /
+  Nagad / Upay underneath. A `cells` discovery reads every method cell whose visible name
+  carries one of the channel words and reads its number, attributing the account to the
+  channel the name implies. A rename or an addition is collected without a config edit.
+- **A dropdown whose options drift.** Bank Transfer lists its recipient banks in a
+  `<select>` that changes without notice. An `options` discovery walks every option the
+  dropdown offers and takes the bank name from the option label, so the bank list is read
+  off the page instead of hard-coded and re-checked by hand.
+
+A discovery only ever *opens* a method's modal — it never confirms a deposit — so it cannot
+initiate an order however a new module is wired. The one method whose payee is a name
+reached only by confirming (a paykassma redirect) therefore stays an explicit
+`creates_order` probe; a discovery that lands on it simply reads no number and moves on.
+Each discovered method flows into the same extraction path as a probe: the block that reads
+it is built at run time from what the discovery worked out — the channel a name implied, or
+the bank an option named — which is exactly what a hand-written probe's block would carry.
 
 ### 6.2 Blame and completeness are separate questions
 

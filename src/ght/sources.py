@@ -183,6 +183,87 @@ class Reset(_Strict):
     gone: str
 
 
+class Discovery(_Strict):
+    """A family of methods found and walked at run time rather than named one by one.
+
+    A `probe` pins a fixed method by its selector; a discovery instead enumerates whatever
+    the panel is showing right now and walks each match. Two reasons it exists:
+
+    - **New modules with familiar names.** These operators spin up payment modules under
+      fresh ids constantly — "The Local Nagad", "Upay Free", tomorrow's "Super Bkash" — all
+      still bKash / Nagad / Upay underneath. A fixed probe list only ever sees the ones
+      written down; `kind: cells` finds every cell whose visible name carries one of the
+      channel words and reads its number, so a rename or an addition is collected without a
+      config edit.
+    - **A dropdown whose options drift.** Bank Transfer lists its recipient banks in a
+      `<select>` that changes without notice. `kind: options` walks every option the
+      dropdown offers, so the bank list is read off the page instead of hard-coded and
+      re-checked by hand.
+
+    Only the modal is opened, never a deposit confirmed, so a discovery never initiates an
+    order — the one paykassma method whose payee needs a confirm stays an explicit probe.
+    """
+
+    name: str
+    # ``cells`` clicks each matching method cell; ``options`` selects each dropdown option.
+    kind: str
+    # Steps to reach the enumerable list. Empty for ``cells`` (the grid is already there);
+    # for ``options`` this opens the method whose panel carries the dropdown.
+    open: list[Step] = Field(default_factory=list)
+    # ``cells``: selector enumerating candidate method cells, scoped to the section wanted.
+    # ``options``: selector for the ``<select>`` whose options are walked.
+    items: str
+    # ``cells`` only: the visible-name element inside a cell, and the attribute that
+    # identifies it so the same cell can be reopened after a reset.
+    label: str | None = None
+    key_attr: str = "data-method"
+    # ``cells`` only: a cell qualifies when its name contains one of these (case-insensitive).
+    # Each entry doubles as the channel the match is attributed to, so they must be channels.
+    match: list[str] = Field(default_factory=list)
+    # A fixed channel for every match. Required for ``options`` (which has no name to read);
+    # for ``cells`` it overrides the matched-word inference.
+    channel: str | None = None
+    # Modal-ready selector to wait for after opening a match, raced against the site's
+    # own "unavailable" panel exactly as a probe's ``wait_for`` is.
+    wait_for: str | None = None
+    # The number/value element inside the opened modal, the box it sits in (so the name and
+    # account-type reader sees only this method's text, not the whole panel), and an
+    # optional holder beside it.
+    value: str
+    container: str | None = None
+    holder: str | None = None
+    account_type: str | None = None
+    # ``options`` only: option labels or values to pass over — the "choose a bank" placeholder.
+    skip_options: list[str] = Field(default_factory=list)
+
+    @field_validator("kind")
+    @classmethod
+    def _known_kind(cls, value: str) -> str:
+        if value not in {"cells", "options"}:
+            raise ValueError(f"discovery kind must be 'cells' or 'options', not {value!r}")
+        return value
+
+    @model_validator(mode="after")
+    def _coherent(self) -> Discovery:
+        if self.kind == "cells":
+            if not self.label:
+                raise ValueError("a cells discovery needs a label selector to read each name")
+            for word in self.match:
+                if word not in ALL_CHANNELS:
+                    raise ValueError(
+                        f"discovery match {word!r} is used as a channel; "
+                        f"expected one of {sorted(ALL_CHANNELS)}"
+                    )
+            if not self.match and not self.channel:
+                raise ValueError("a cells discovery needs match words or a fixed channel")
+        else:  # options
+            if not self.channel:
+                raise ValueError("an options discovery needs a channel")
+        if self.channel and self.channel not in ALL_CHANNELS:
+            raise ValueError(f"unknown channel {self.channel!r}")
+        return self
+
+
 class SourceConfig(_Strict):
     slug: str
     name: str
@@ -214,6 +295,10 @@ class SourceConfig(_Strict):
     timeout: int | None = None
     # Per-method probes. A source uses either these or the single flow/blocks pair above.
     probes: list[Probe] = Field(default_factory=list)
+    # Families of methods enumerated and walked at run time — new modules under familiar
+    # names, and dropdown options that drift. Run inside the same loaded panel the probes
+    # use, after them.
+    discover: list[Discovery] = Field(default_factory=list)
     # How to put the panel back the way it was between probes. Every probe needs the
     # method list, and reaching it again by reloading the page costs the iframe's whole
     # start-up - measured at ten to thirteen seconds, which was most of a run. Closing the
@@ -276,6 +361,14 @@ class SourceConfig(_Strict):
                 "use either probes or a single flow/blocks pair, not both: "
                 "with probes configured the top-level flow and blocks would never run"
             )
+        if self.discover:
+            if self.fetcher != "browser":
+                raise ValueError(f"discover requires fetcher: browser, got {self.fetcher!r}")
+            if self.reset is None:
+                raise ValueError(
+                    "discover walks several methods through one loaded panel and so needs a "
+                    "reset, the same as probes do"
+                )
         return self
 
     @property

@@ -23,7 +23,7 @@ from ght.pipeline.dedup import record_observations
 from ght.pipeline.evidence import store_capture
 from ght.progress import ProgressFn
 from ght.progress import report as emit_progress
-from ght.sources import Probe, SourceConfig
+from ght.sources import Block, Probe, SourceConfig
 from ght.types import RawCapture
 
 
@@ -219,7 +219,10 @@ def _collect_in_one_visit(
     configured reset can do this: without a proven way back to the method list, sharing the
     panel risks one method's modal answering the next method's question.
     """
-    if config.fetcher != "browser" or config.reset is None or len(probes) < 2:
+    # Worth sharing the panel for more than one probe, or for any discovery - a discovery
+    # walks several methods through the same loaded panel just as probes do.
+    enough_to_share = len(probes) >= 2 or bool(config.discover)
+    if config.fetcher != "browser" or config.reset is None or not enough_to_share:
         return None
 
     fetcher = get_fetcher(config.fetcher, **_fetcher_kwargs(config))
@@ -243,7 +246,7 @@ def _collect_in_one_visit(
 
     total = len(plans)
     emit_progress(on_progress, "collect", f"Opening the deposit panel ({total} methods)", step=0, total=total)
-    results = fetcher.fetch_many(urls, plans)
+    results, discovered = fetcher.fetch_many(urls, plans, config.discover)
 
     captures = []
     auth_expired = False
@@ -252,7 +255,31 @@ def _collect_in_one_visit(
         captures.append((probe, probe_config, capture))
         if _looks_logged_out(config, capture):
             auth_expired = True
+
+    for found in discovered:
+        emit_progress(on_progress, "collect", f"Found {found.name}")
+        captures.append(_discovered_capture(config, found))
+        if _looks_logged_out(config, found.capture):
+            auth_expired = True
     return captures, (urls[0] if urls else None), auth_expired
+
+
+def _discovered_capture(config: SourceConfig, found) -> tuple:
+    """Turn one run-time discovery into the probe/config/capture triple extraction reads.
+
+    A discovered method was never named in config, so the block that reads it is built here
+    from what the discovery worked out - the channel a cell's name implied, or the bank an
+    option named - which is exactly what a hand-written probe's block would have carried."""
+    block = Block(
+        channel=found.channel,
+        value=found.value,
+        container=found.container,
+        holder=found.holder,
+        account_type=found.account_type,
+        bank_name=found.bank_name,
+    )
+    probe = Probe(name=found.name, blocks=[block])
+    return probe, config_for_probe(config, probe), found.capture
 
 
 def _collect_captures(
