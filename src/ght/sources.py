@@ -223,6 +223,12 @@ class Discovery(_Strict):
     # A fixed channel for every match. Required for ``options`` (which has no name to read);
     # for ``cells`` it overrides the matched-word inference.
     channel: str | None = None
+    # A selector that proves the method list has finished rendering, waited for before any
+    # enumeration. The embedded panel's frame appears seconds before its cells do, so a
+    # discovery that queried the moment the frame existed found an empty list. Set it to
+    # something every loaded panel shows (any method cell); a section that then holds no
+    # matching cell is genuinely empty and returns nothing at once, without a timeout.
+    ready: str | None = None
     # Modal-ready selector to wait for after opening a match, raced against the site's
     # own "unavailable" panel exactly as a probe's ``wait_for`` is.
     wait_for: str | None = None

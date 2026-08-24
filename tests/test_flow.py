@@ -1227,6 +1227,8 @@ class DiscoveryPanel:
                     self.opened.append(method)
                     return cell
             return None
+        if ".value" in selector:  # the watched account, reflecting the last bank picked
+            return _Text(self.selected[-1] if self.selected else "")
         return _Shown()
 
     def select_option(self, selector, value=None, force=False, timeout=None):
@@ -1458,3 +1460,40 @@ def test_a_cells_discovery_waits_for_the_panel_instead_of_reading_the_lobby():
     assert found == []
     # It never fell back to enumerating cells on the top document.
     assert page.queried == []
+
+
+class _ChangingValue:
+    """A frame whose watched value only settles to the new option after a few polls."""
+
+    def __init__(self, settle_after, new_text, prev_text):
+        self._polls = 0
+        self._settle = settle_after
+        self._new = new_text
+        self._prev = prev_text
+        self.waited = 0
+
+    def query_selector(self, _selector):
+        self._polls += 1
+        return _Text(self._new if self._polls > self._settle else self._prev)
+
+    def wait_for_timeout(self, ms):
+        self.waited += ms
+
+
+def test_a_bank_option_waits_for_its_account_to_replace_the_last_one():
+    """The bug this covers had every bank reporting the first bank's account: the previous
+    account is still in the modal the instant a new option is picked, so the walk must wait
+    for the value to change, not merely to exist."""
+    fetcher = BrowserFetcher(flow_timeout=10)
+    frame = _ChangingValue(settle_after=3, new_text="0210273160031", prev_text="1897348759696")
+    fetcher._await_value_change(frame, ".modal-payment.active .value", previous="1897348759696")
+    # It polled past the stale value and only returned once the new account had loaded.
+    assert frame._polls > 3
+    assert fetcher._text_of(frame, ".x") == "0210273160031"
+
+
+def test_the_first_option_waits_for_its_value_to_appear_at_all():
+    fetcher = BrowserFetcher(flow_timeout=10)
+    frame = _ChangingValue(settle_after=2, new_text="1897348759696", prev_text="")
+    fetcher._await_value_change(frame, ".value", previous=None)
+    assert frame._polls > 2

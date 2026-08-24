@@ -647,6 +647,21 @@ class BrowserFetcher:
         frame, error = self._target(page)
         return frame if error is None else None
 
+    def _panel_ready(self, frame, disc) -> bool:
+        """Wait for the method list to have rendered before enumerating it.
+
+        The frame exists seconds before its cells do; without this the enumeration runs
+        against an empty list. With no ``ready`` selector configured there is nothing to
+        wait for and the caller proceeds - the same as before.
+        """
+        if not disc.ready:
+            return True
+        try:
+            frame.wait_for_selector(disc.ready, timeout=self.timeout)
+            return True
+        except Exception:  # noqa: BLE001 - a list that never renders has nothing to walk
+            return False
+
     def _infer_channel(self, label: str, disc) -> str | None:
         """The channel a discovered cell belongs to - fixed, or read from its name."""
         if disc.channel:
@@ -666,7 +681,7 @@ class BrowserFetcher:
         is collected by an explicit probe that accepts the order, or not at all.
         """
         frame = self._panel_frame(page)
-        if frame is None:
+        if frame is None or not self._panel_ready(frame, disc):
             return []
         targets = []
         try:
@@ -689,8 +704,17 @@ class BrowserFetcher:
             selector = f'{disc.items}[{disc.key_attr}="{key}"]'
             capture = self._open_and_snapshot(page, selector, disc.wait_for)
             out.append(self._as_discovered(disc, f"{disc.name}: {label}", channel, capture))
-            if position + 1 < len(targets) and not self._reset_panel(self._open_frame(page)):
-                self._load_any(page, urls)
+            if position + 1 < len(targets):
+                # Back to the list for the next cell. A modal that will not close is a
+                # reload - and a reload leaves the frame present but its cells not yet
+                # rendered, so the panel is waited for again before the next click. Without
+                # this re-wait, the cell after a reload was clicked on an empty lobby and
+                # opened nothing, which is what left half the e-wallets uncollected.
+                if not self._reset_panel(self._open_frame(page)):
+                    self._load_any(page, urls)
+                frame = self._panel_frame(page)
+                if frame is None or not self._panel_ready(frame, disc):
+                    break
         return out
 
     def _discover_options(self, page, disc) -> list:
@@ -700,7 +724,7 @@ class BrowserFetcher:
         bank added or dropped is picked up on the next run instead of at the next hand-fix.
         """
         frame = self._panel_frame(page)
-        if frame is None:
+        if frame is None or not self._panel_ready(frame, disc):
             return []
         self.flow = disc.open
         self._unavailable_hit = None
@@ -728,12 +752,18 @@ class BrowserFetcher:
             return []
 
         out = []
+        previous = None
         for value, label in descriptors:
             try:
                 frame.select_option(disc.items, value=value, force=True, timeout=self.flow_timeout)
+                # Wait for the account to actually change, not merely to exist. The previous
+                # bank's account is still in the modal the instant the option is picked, so a
+                # plain wait_for_selector returns at once and the snapshot captures the bank
+                # before this one - which had every bank reporting the first one's account.
                 if disc.wait_for:
-                    frame.wait_for_selector(disc.wait_for, timeout=self.flow_timeout)
+                    self._await_value_change(frame, disc.wait_for, previous)
                 capture = self._snapshot(page, frame)
+                previous = self._text_of(frame, disc.wait_for)
             except Exception as exc:  # noqa: BLE001 - a broken option is a reportable result
                 capture = self._failed(
                     page.url, f"selecting {label!r} failed: {type(exc).__name__}"
@@ -744,6 +774,30 @@ class BrowserFetcher:
                 )
             )
         return out
+
+    def _text_of(self, frame, selector: str) -> str | None:
+        """The text of the first element matching ``selector``, or None."""
+        try:
+            element = frame.query_selector(selector)
+            return element.inner_text().strip() if element else None
+        except Exception:  # noqa: BLE001 - unreadable is no text
+            return None
+
+    def _await_value_change(self, frame, selector: str, previous: str | None) -> None:
+        """Wait until the watched value differs from what the last option showed.
+
+        On the first option there is nothing to differ from, so this waits for the value to
+        appear at all. If it never changes - two options with the same account, or a value
+        that will not load - it returns after the flow budget and the snapshot is taken of
+        whatever is there."""
+        waited = 0
+        step = 300
+        while waited < self.flow_timeout:
+            text = self._text_of(frame, selector)
+            if text and text != previous:
+                return
+            frame.wait_for_timeout(step)
+            waited += step
 
     @staticmethod
     def _as_discovered(disc, name, channel, capture, bank_name=None):
@@ -776,7 +830,14 @@ class BrowserFetcher:
         return False
 
     def _open_and_snapshot(self, page, selector: str, wait_for: str | None):
-        """Click a method cell, wait for its modal, and capture what it shows."""
+        """Click a method cell and capture the modal it opens.
+
+        A click that cannot happen at all - the cell is gone - is a failure with no page to
+        show. A modal that opens but never renders the awaited element is *not*: the methods
+        that reach their payee by redirecting (Fast Nagad, LightSpeed) open a modal whose
+        markup differs, and one that is switched off opens the site's own panel. Both are
+        worth capturing, and extraction decides whether there is a number. So a wait that
+        times out still takes the snapshot rather than throwing the page away."""
         frame = self._open_frame(page)
         self._unavailable_hit = None
         try:
@@ -784,12 +845,15 @@ class BrowserFetcher:
             if cell is None:
                 return self._failed(page.url, f"cell {selector!r} was gone", flow_error="no cell")
             cell.click(timeout=self.flow_timeout)
-            if wait_for:
-                self._wait_for_either(frame, wait_for)
-        except Exception as exc:  # noqa: BLE001 - a broken open is a reportable result
+        except Exception as exc:  # noqa: BLE001 - a click that cannot land is a real failure
             return self._failed(
                 page.url, f"opening {selector!r} failed: {type(exc).__name__}", flow_error="open"
             )
+        if wait_for:
+            try:
+                self._wait_for_either(frame, wait_for)
+            except Exception:  # noqa: BLE001, S110 - snapshot whatever rendered anyway
+                pass
         return self._snapshot(page, self._open_frame(page))
 
     def _snapshot(self, page, frame):

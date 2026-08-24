@@ -148,25 +148,34 @@ discover:
     kind: cells
     items: '.section-block:has(.section_name_title:has-text("E-wallets")) .payment-cell'
     label: ".payment-cell-name__caption--is-title"
+    # The frame appears before its cells do; wait for any cell before enumerating.
+    ready: ".payment-cell"
     match: [bkash, nagad, upay]
-    wait_for: ".modal-payment.active .payment_modal_input--html, .modal-payment.active .modal-message-address"
+    wait_for: ".modal-payment.active"
     container: ".modal-payment.active"
     value: ".modal-payment.active .payment_modal_input--html, .modal-payment.active .modal-message-address"
 
-  # Bank Transfer no longer offers a recipient-bank dropdown - it opens straight to a single
-  # account, the way Internet Banking does. So it is walked as a cell rather than by
-  # iterating options: every cell in the Bank transfer section is opened and its account
-  # read, under a fixed bank_transfer channel (the section's names carry no channel word to
-  # infer from). If the method is switched off, or gone from the list entirely, this simply
-  # finds no cell and yields nothing.
-  - name: bank-transfer
-    kind: cells
-    items: '.section-block:has(.section_name_title:has-text("Bank transfer")) .payment-cell'
-    label: ".payment-cell-name__caption--is-title"
+  # Bank Transfer opens to a "Select recipient's bank" dropdown and shows nothing until a
+  # bank is chosen; choosing one fills the modal in place with that bank's account, no
+  # confirm and so no order. Every option is walked and the bank taken from its label, so a
+  # bank added or dropped is picked up next run. Verified live 2026-08-24: the options were
+  # Dutch-Bangla Bank Limited / IFIC / Islami Bank Bangladesh Limited / The city bank
+  # limited, the account sits in the 2nd modal row and the holder in the 3rd (a *Code row
+  # further down also uses .modal-message-address, which is why the value is pinned to the
+  # row rather than left to match every address in the modal).
+  - name: bank
+    kind: options
     channel: bank_transfer
-    wait_for: ".modal-payment.active .payment_modal_input--html, .modal-payment.active .modal-message-address"
+    ready: ".payment-cell"
+    open:
+      - click: '.section-block:has(.section_name_title:has-text("Bank transfer")) .payment-cell[data-method="bt_bangla"]'
+        wait_for: ".modal-payment.active select"
+    items: ".modal-payment.active select"
+    skip_options: ["0", "Select recipient's bank"]
+    wait_for: ".modal-payment.active .payment_modal_row:nth-of-type(2) .modal-message-address"
     container: ".modal-payment.active"
-    value: ".modal-payment.active .payment_modal_input--html, .modal-payment.active .modal-message-address"
+    value: ".payment_modal_row:nth-of-type(2) .modal-message-address"
+    holder: ".payment_modal_row:nth-of-type(3) .modal-message-address"
 
 ignore_numbers: []
 
@@ -246,12 +255,29 @@ notes: |
   too. Extraction of the bt3 modal was checked offline against run 182's captured Bkash
   panel (number in `.payment_modal_input--html`, sometimes `.modal-message-address`).
 
-  Still wants a live check the first time it runs (all modelled, none seen live yet):
-    - `discover: bank-transfer` — Bank Transfer no longer has the recipient-bank dropdown
-      the earlier recon saw; the operator confirms it now opens straight to one account, so
-      it is walked as a cell, not by iterating a `<select>`. The value selector is the same
-      bt3 pair the e-wallets use; confirm the account actually renders there.
+  2026-08-24 live walk (session valid, no CAPTCHA). Discovery verified end to end against
+  the live panel, and two things it turned up:
+
+    - The whole discovery machinery needed two fixes the live run exposed and offline tests
+      could not: the panel's iframe appears seconds before its cells render, so enumeration
+      has to wait for a cell (`ready:`); and after an order-creating probe navigates away
+      the panel is reloaded, so the frame has to be waited for again between cells or the
+      next click lands on an empty lobby. Both fixed in the fetcher.
+
+    - Bank Transfer DOES still have the recipient-bank dropdown - an earlier read that it
+      was gone was wrong. Live options: Dutch-Bangla Bank Limited, IFIC, Islami Bank
+      Bangladesh Limited, The city bank limited, each filling the modal in place with its
+      account (2nd row) and holder (3rd row), no confirm and so no order. So it is back to a
+      `kind: options` discovery. The account only changes a moment after the option is
+      picked, so the walk waits for the value to *change*, not merely to exist - otherwise
+      every bank reported the first one's account.
+
+  Collected live: Bkash, Upay, Bkash Free, Upay Free (e-wallets) and all four banks, each
+  a distinct account. Fast Nagad / LightSpeed Bkash / The Local Nagad open a redirect modal
+  with no number, which is expected - the first two are name-only probes, the third yields
+  nothing.
+
+  Still wants a live check the first time it runs:
     - `lightspeed-bkash` — its redirect destination selector is copied from `fast-nagad`.
-      creates_order, so it only runs when the operator agrees.
-    - The Local Nagad (interkassa2) — never walked before; its modal may print a number or
-      may redirect. If it redirects it simply yields nothing here, which is safe.
+      creates_order, so it only runs when the operator agrees; not walked in the discovery
+      test above (that opens modals only, never confirms).
