@@ -471,3 +471,18 @@ def test_no_picture_beats_the_wrong_picture(session, tmp_path, monkeypatch):
     assert _screenshot_for(session, stranger) is None
     # And the payees that are on those pages are unaffected.
     assert _screenshot_for(session, accounts["upay"]) is not None
+
+
+def test_evidence_folder_name_is_filesystem_safe():
+    """A discovered method is named for what it is - "e-wallet: Fast Nagad" - and the colon
+    in that is an illegal path character on Windows, which crashed the whole run at
+    evidence-storing time. The folder is folded to a safe name; hand-written probe names,
+    already safe, are left unchanged."""
+    from ght.pipeline.run import _evidence_name
+
+    assert _evidence_name("nexus-pay") == "nexus-pay"
+    assert _evidence_name("fast-nagad") == "fast-nagad"
+    assert _evidence_name("e-wallet: Fast Nagad") == "e-wallet-fast-nagad"
+    assert _evidence_name("bank: The city bank limited") == "bank-the-city-bank-limited"
+    # No colon, space, slash or backslash survives.
+    assert not set(_evidence_name("x: a/b\\c")) & set(": /\\")

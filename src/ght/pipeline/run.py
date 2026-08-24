@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 
 from sqlalchemy import select
@@ -264,6 +265,18 @@ def _collect_in_one_visit(
     return captures, (urls[0] if urls else None), auth_expired
 
 
+def _evidence_name(probe_name: str) -> str:
+    """A filesystem-safe folder name for a probe's evidence.
+
+    Hand-written probe names are already safe, but a discovered method is named for what it
+    is - "e-wallet: Fast Nagad", "bank: The city bank limited" - and the colon in that is an
+    illegal path character on Windows, which crashed the whole run at evidence-storing time.
+    The display name is kept as it is; only the folder is folded to letters, digits and
+    hyphens."""
+    safe = re.sub(r"[^A-Za-z0-9]+", "-", probe_name).strip("-").lower()
+    return safe or "probe"
+
+
 def _discovered_capture(config: SourceConfig, found) -> tuple:
     """Turn one run-time discovery into the probe/config/capture triple extraction reads.
 
@@ -515,7 +528,7 @@ def run_site(
         # selectors can still be re-processed from the exact bytes we saw. A dry run must
         # not touch the evidence store either, so this is skipped there.
         if not dry_run:
-            for blob in store_capture(f"{config.slug}/{probe.name}", probe_capture):
+            for blob in store_capture(f"{config.slug}/{_evidence_name(probe.name)}", probe_capture):
                 session.add(
                     Evidence(
                         run_id=run.id,
