@@ -139,11 +139,33 @@ class _Report:
         left, right = self.PAGE_MARGIN, w - self.PAGE_MARGIN
 
         # The mark, drawn rather than embedded so the report needs no asset alongside it.
+        # The same shield-and-scope emblem the portal shows: white line-art on the accent
+        # square, redrawn here in ReportLab primitives rather than carried as an image.
         c.setFillColorRGB(*ACCENT)
         c.roundRect(left, h - 46, 22, 22, 5, stroke=0, fill=1)
+
+        cx, cy = left + 11, h - 35  # centre of the 22pt mark
         c.setStrokeColorRGB(1, 1, 1)
-        c.setLineWidth(1.4)
-        c.roundRect(left + 6, h - 40, 10, 10, 2.5, stroke=1, fill=0)
+        c.setLineWidth(1.3)
+        c.setLineJoin(1)
+        c.setLineCap(1)
+
+        # Shield outline: flat top, shoulders, tapering to a point.
+        shield = c.beginPath()
+        shield.moveTo(cx - 6.5, cy + 6.5)
+        shield.lineTo(cx + 6.5, cy + 6.5)
+        shield.lineTo(cx + 6.5, cy + 0.5)
+        shield.lineTo(cx, cy - 7.5)
+        shield.lineTo(cx - 6.5, cy + 0.5)
+        shield.close()
+        c.drawPath(shield, stroke=1, fill=0)
+
+        # Scope: a ring, a filled centre, and a pointer out of it.
+        c.setLineWidth(1.1)
+        c.circle(cx, cy + 1.3, 3.6, stroke=1, fill=0)
+        c.setFillColorRGB(1, 1, 1)
+        c.circle(cx, cy + 1.3, 1.4, stroke=0, fill=1)
+        c.line(cx, cy + 1.3, cx + 3.1, cy + 3.6)
 
         c.setFillColorRGB(*INK)
         c.setFont("Helvetica-Bold", 12)
