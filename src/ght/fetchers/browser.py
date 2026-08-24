@@ -626,14 +626,26 @@ class BrowserFetcher:
         """Walk every discovery on the loaded panel, one after another."""
         out: list = []
         for disc in discoveries:
-            # Each discovery starts from the method list, the same as a probe does.
+            # Each discovery starts from the method list, the same as a probe does. When the
+            # panel was reloaded - which it always is after an order-creating probe navigated
+            # away - the embedded app takes ten-plus seconds to reappear, so the frame is
+            # waited for rather than grabbed: querying the top page for cells that live in
+            # the iframe finds nothing and the discovery comes back empty.
             if not self._reset_panel(self._open_frame(page)):
                 self._load_any(page, urls)
+            if self._panel_frame(page) is None:
+                continue
             if disc.kind == "cells":
                 out.extend(self._discover_cells(page, urls, disc))
             else:
                 out.extend(self._discover_options(page, disc))
         return out
+
+    def _panel_frame(self, page):
+        """The embedded panel, waited for the way a probe waits for it. None if it never
+        comes - a dead session or a page that did not load, where there is nothing to walk."""
+        frame, error = self._target(page)
+        return frame if error is None else None
 
     def _infer_channel(self, label: str, disc) -> str | None:
         """The channel a discovered cell belongs to - fixed, or read from its name."""
@@ -653,7 +665,9 @@ class BrowserFetcher:
         redirect simply shows no number here and yields nothing, which is correct: its name
         is collected by an explicit probe that accepts the order, or not at all.
         """
-        frame = self._open_frame(page)
+        frame = self._panel_frame(page)
+        if frame is None:
+            return []
         targets = []
         try:
             cells = frame.query_selector_all(disc.items)
@@ -685,7 +699,9 @@ class BrowserFetcher:
         The bank names are read off the option labels rather than named in config, so a
         bank added or dropped is picked up on the next run instead of at the next hand-fix.
         """
-        frame = self._open_frame(page)
+        frame = self._panel_frame(page)
+        if frame is None:
+            return []
         self.flow = disc.open
         self._unavailable_hit = None
         open_error = self._walk(frame, page)

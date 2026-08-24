@@ -1418,3 +1418,43 @@ def test_discover_requires_a_reset_to_share_the_panel():
                 )
             ],
         )
+
+
+class _NoFramePage:
+    """A page whose embedded panel has not appeared yet - the state right after a reload."""
+
+    url = "https://bd.1xbet.com/en/office/recharge"
+
+    def __init__(self):
+        self.frames = []
+        self.queried = []
+
+    def content(self):
+        return "<html><body>the lobby, no panel yet</body></html>"
+
+    def query_selector_all(self, selector):
+        self.queried.append(selector)  # if discovery ever reaches here it read the wrong doc
+        return [_Cell("Bkash", "bt_bangladesh_default")]
+
+    def wait_for_timeout(self, ms):
+        pass
+
+
+def test_a_cells_discovery_waits_for_the_panel_instead_of_reading_the_lobby():
+    """The bug this covers: after an order-creating probe navigated away, the panel is
+    reloaded and takes ten-plus seconds to reappear. Reading the top page for cells that
+    live in the iframe found nothing and the whole discovery came back empty."""
+    from ght.sources import Reset
+
+    fetcher = BrowserFetcher(
+        screenshot=False,
+        frame="/paysystems/deposit",  # a frame IS configured
+        timeout=0,  # so the wait for it returns at once for the test
+        reset=Reset(click=".x", gone=GONE),
+    )
+    page = _NoFramePage()
+    found = fetcher._discover_cells(page, ["https://x/"], _cells_discovery())
+
+    assert found == []
+    # It never fell back to enumerating cells on the top document.
+    assert page.queried == []
