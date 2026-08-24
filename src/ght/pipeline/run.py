@@ -91,6 +91,7 @@ def _fetcher_kwargs(config: SourceConfig) -> dict:
         "channel": config.browser_channel,
         "frame": config.frame,
         "logged_out_marker": config.logged_out_marker,
+        "session_expired": config.session_expired,
         "unavailable": config.unavailable,
         "reset": config.reset,
         "shot": config.shot,
@@ -177,13 +178,20 @@ def _capture_status(capture: RawCapture) -> str:
 def _looks_logged_out(config: SourceConfig, capture: RawCapture) -> bool:
     """Whether a capture shows an expired session rather than the deposit page.
 
-    Two independent signals, either is enough: the fetcher flagged the body as logged out,
-    or the request was redirected to the site's login page. The URL signal matters because
-    a login page shares no markup with the deposit page, so a body marker taken from the
-    logged-out homepage will not match it.
+    Three independent signals, any one is enough: the fetcher flagged the capture as logged
+    out, the body carries the logged-out marker, or the request was redirected to the site's
+    login page. The URL signal matters because a login page shares no markup with the
+    deposit page, so a body marker taken from the logged-out homepage will not match it.
+
+    The fetcher's own flag stands on its own rather than only confirming a marker. It is
+    raised where the fetcher has proof — the logged-out layout, or the payment app's own
+    refusal dialog — and a site configured with no body marker, as Melbet is, would
+    otherwise have that proof thrown away.
     """
+    if capture.flow_error == "LOGGED_OUT":
+        return True
     marker = config.logged_out_marker
-    if marker and (capture.flow_error == "LOGGED_OUT" or marker in capture.text):
+    if marker and marker in capture.text:
         return True
     url_marker = config.logged_out_url
     return bool(url_marker and url_marker in (capture.url or ""))

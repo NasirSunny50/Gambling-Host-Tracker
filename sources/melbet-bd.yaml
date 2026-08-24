@@ -69,6 +69,15 @@ reset:
 # a provider's own checkout - this finds nothing and the whole page is captured instead.
 shot: ".modal-payment.active"
 
+# The panel refuses an expired session with its own dialog, drawn on the page rather than
+# inside the frame: the method list still renders behind it and every click lands on the
+# dialog. The URL signal below cannot see that - the site keeps serving the signed-in shell
+# and never redirects - so without this a dead session reads as every selector breaking at
+# once. Matched on the dialog being *visible*, because its markup is in the page either
+# way. Seeing it ends the run and sends it back to sign in.
+session_expired:
+  - 'text="The session has expired"'
+
 # Verified 2026-08-23: a logged-out request for /en/office/recharge answers 200 and lands on
 # /en/user/login?return-url=... , so the URL is the reliable expiry signal here.
 logged_out_url: /user/login

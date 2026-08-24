@@ -237,6 +237,15 @@ class SourceConfig(_Strict):
     # request for the account page by redirecting to its login page. More reliable than a
     # body marker, since the login page shares no markup with the deposit page.
     logged_out_url: str | None = None
+    # Substrings the page *around* the panel shows when the payment app itself refuses the
+    # session — the site still serves the signed-in shell and still embeds the panel, and
+    # only the embedded app says no. Neither marker above sees that: the shell is not the
+    # logged-out layout and the URL never changes. Without it a refused session looks like
+    # every selector in the config breaking at once, and the run walks each method into the
+    # same blocking overlay at full timeout before reporting a config fix that would not
+    # help. Matched against the top document, because the overlay is drawn outside the
+    # frame the probes work in.
+    session_expired: list[str] = Field(default_factory=list)
     # The element to photograph, when a page is mostly not the payee. These deposit pages
     # run to thousands of pixels of lobby around one small panel, and a reviewer opening the
     # evidence needs the panel. Unset, or absent from the page, means capture all of it -

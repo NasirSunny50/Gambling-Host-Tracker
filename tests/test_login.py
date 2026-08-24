@@ -190,6 +190,59 @@ def test_logged_out_detected_by_body_marker():
     assert _looks_logged_out(config, hit) is True
 
 
+def test_the_fetchers_own_verdict_stands_without_a_body_marker():
+    """Melbet has no logged-out marker, only a URL one — and the payment app refuses
+    without ever redirecting. Requiring a marker to believe the fetcher threw that away."""
+    from ght.pipeline.run import _looks_logged_out
+    from ght.types import RawCapture
+
+    config = _login_config().model_copy(update={"logged_out_marker": None})
+    refused = RawCapture(
+        url="https://melbet-76956.bar/en/office/recharge",
+        status_code=200,
+        html="<div>the method list, behind a dialog</div>",
+        flow_error="LOGGED_OUT",
+    )
+    assert _looks_logged_out(config, refused) is True
+
+
+def test_the_panel_refusing_the_session_is_not_a_signed_in_page():
+    """The frame loads for a refused session too. Checking only that it appeared reported
+    the session as good and then failed every probe against the dialog covering it."""
+    from ght.auth_login import _page_is_signed_in
+
+    class Frame:
+        url = "https://bd.1xbet.com/paysystems/deposit/?h_token=x"
+
+    class Handle:
+        def is_visible(self):
+            return True
+
+    class Page:
+        url = "https://bd.1xbet.com/en/office/recharge"
+
+        def __init__(self):
+            self.frames = [self, Frame()]
+
+        def content(self):
+            return "<div>account 177…</div>"
+
+        def query_selector(self, selector):
+            return Handle() if selector == 'text="The session has expired"' else None
+
+        def wait_for_timeout(self, ms):
+            pass
+
+    config = _login_config().model_copy(
+        update={
+            "frame": "/paysystems/deposit",
+            "logged_out_marker": None,
+            "session_expired": ['text="The session has expired"'],
+        }
+    )
+    assert _page_is_signed_in(Page(), config, require_frame=True) is False
+
+
 def test_saved_session_is_restored_into_the_check_context(tmp_path):
     """The session check is meaningless unless it actually carries the saved cookies."""
     import json

@@ -258,7 +258,7 @@ def _payment_frame_appears(page, config: SourceConfig, timeout_ms: int = FRAME_W
     while waited <= timeout_ms:
         for frame in page.frames:
             if config.frame in (frame.url or ""):
-                return True
+                return _panel_accepts_session(page, config)
         # The logged-out layout can also appear late, once the site has decided about the
         # session. Bail the moment it does rather than waiting out the whole window.
         marker = config.logged_out_marker
@@ -267,6 +267,48 @@ def _payment_frame_appears(page, config: SourceConfig, timeout_ms: int = FRAME_W
         page.wait_for_timeout(step)
         waited += step
     return False
+
+
+# The refusal dialog is drawn a beat after the panel appears, so a check that reads the
+# page the instant the frame exists sees a clean one. Long enough to catch it, short enough
+# that a healthy session is still proven in about a second.
+REFUSAL_GRACE_MS = 2500
+
+
+def _panel_accepts_session(page, config: SourceConfig) -> bool:
+    """Whether the loaded payment app will actually serve this session.
+
+    The frame appearing is not the whole answer. These sites embed the panel for an expired
+    session too, render the full method list inside it, and then cover the lot with their
+    own "the session has expired" dialog — drawn on the page, not in the frame. Every click
+    lands on that dialog, so a run that starts here spends its whole budget being refused
+    and reports twelve broken selectors.
+
+    Treating the refusal as signed-out costs one sign-in window and collects; believing the
+    frame costs a run.
+    """
+    if not config.session_expired:
+        return True
+    waited = 0
+    while waited < REFUSAL_GRACE_MS:
+        if any(_visible(page, selector) for selector in config.session_expired):
+            return False
+        page.wait_for_timeout(250)
+        waited += 250
+    return True
+
+
+def _visible(page, selector: str) -> bool:
+    """Whether the selector matches something actually on screen.
+
+    Presence proves nothing here: the dialog's markup sits in the page either way, and only
+    its being up means the panel is refusing us.
+    """
+    try:
+        handle = page.query_selector(selector)
+        return handle is not None and handle.is_visible()
+    except Exception:  # noqa: BLE001 - unreadable is not visible
+        return False
 
 
 def _page_is_signed_in(page, config: SourceConfig, require_frame: bool = False) -> bool:

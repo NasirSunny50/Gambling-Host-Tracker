@@ -87,6 +87,7 @@ class BrowserFetcher:
         channel: str | None = None,
         frame: str | None = None,
         logged_out_marker: str | None = None,
+        session_expired: list[str] | None = None,
         unavailable: list[str] | None = None,
         flow_timeout: int | None = None,
         reset=None,
@@ -112,6 +113,13 @@ class BrowserFetcher:
         self.frame = frame
         # Substring that only appears while logged out, used to fail fast on a dead session.
         self.logged_out_marker = logged_out_marker
+        # Substrings the top document shows when the embedded payment app refuses the
+        # session, while the site around it still looks signed in.
+        self.session_expired = list(session_expired or [])
+        # Whether the probe being walked is expected to take the whole tab somewhere else.
+        # Only the probes that confirm a deposit do, and waiting six seconds for a
+        # navigation that was never coming was paid once per probe, on every probe.
+        self._expects_navigation = True
         # Selectors the site renders when it has switched a method off itself.
         self.unavailable = list(unavailable or [])
         # Clicks get their own, shorter budget: the panel may take a minute to appear, but
@@ -345,11 +353,17 @@ class BrowserFetcher:
         while waited <= deadline:
             for frame in page.frames:
                 if self.frame in frame.url:
+                    # The frame is not the whole answer: the panel embeds for a refused
+                    # session too, and only says so on the page around it.
+                    if self._session_refused(page):
+                        return page, "LOGGED_OUT"
                     return frame, None
             # An expired login shows the logged-out page, where the frame will never come.
             # Bail the moment that is visible rather than waiting out the whole timeout.
             html = self._safe_content(page)
             if self.logged_out_marker and html and self.logged_out_marker in html:
+                return page, "LOGGED_OUT"
+            if self._session_refused(page):
                 return page, "LOGGED_OUT"
             page.wait_for_timeout(step)
             waited += step
@@ -419,6 +433,41 @@ class BrowserFetcher:
     def _looks_logged_out(self, html: str | None) -> bool:
         return bool(self.logged_out_marker and html and self.logged_out_marker in html)
 
+    def _session_refused(self, page) -> bool:
+        """Whether the embedded payment app is refusing this session.
+
+        Read off the top document rather than the frame: the app draws its "session has
+        expired" dialog outside the panel, so a probe reading the frame sees an untouched
+        method list and reports its own click as broken.
+
+        The dialog also blocks every click behind it, which is why one sighting ends the
+        run: the answer is a fresh sign-in, and the twelve probes after this one would each
+        pay a full timeout to learn the same thing.
+
+        Visibility, not presence. These panels keep the dialog's markup in the page whether
+        it is up or not, so a substring test would report a healthy session as refused and
+        open a sign-in window on every run.
+        """
+        return any(self._visible(page, selector) for selector in self.session_expired)
+
+    def _session_refused_within(self, page, budget_ms: int) -> bool:
+        """The same question, given a moment to be answered.
+
+        The dialog is drawn a beat after the panel appears, so asking the instant the frame
+        exists can miss it. Worth a short poll after a page load — and only there: between
+        probes nothing reloads, so an instant look is the whole truth and a poll would be
+        pure cost, paid once per probe.
+        """
+        if not self.session_expired:
+            return False
+        waited = 0
+        while waited < budget_ms:
+            if self._session_refused(page):
+                return True
+            page.wait_for_timeout(250)
+            waited += 250
+        return False
+
     def _open_frame(self, page):
         """The embedded panel as it stands right now, without waiting for one to appear.
 
@@ -481,16 +530,26 @@ class BrowserFetcher:
                             )
                             break
                         needs_load = False
+                        # One look after the load, before walking anything: a refused
+                        # session answers every probe the same way, and finding out on the
+                        # first click costs that probe's whole timeout to learn it.
+                        if self._session_refused_within(page, self.REFUSAL_GRACE_MS):
+                            captures.extend(
+                                self._failed(landing, "session expired", flow_error="LOGGED_OUT")
+                                for _ in plans[index:]
+                            )
+                            break
 
                     # The probe's own flow and completion marker for this pass.
                     self.flow = plan.flow
                     self.wait_for = plan.wait_for
+                    self._expects_navigation = plan.ends_navigation
                     capture = self._capture_here(page, response, auth_warning)
                     captures.append(capture)
                     last_html = capture.html or last_html
 
                     # A dead session hits every probe the same way; stop at the first one.
-                    if self._looks_logged_out(capture.html):
+                    if self._looks_logged_out(capture.html) or capture.flow_error == "LOGGED_OUT":
                         captures.extend(
                             self._failed(landing, "session expired") for _ in plans[index + 1 :]
                         )
@@ -515,13 +574,14 @@ class BrowserFetcher:
             )
         return captures
 
-    def _failed(self, url: str, error: str):
+    def _failed(self, url: str, error: str, flow_error: str | None = None):
         return RawCapture(
             url=url,
             status_code=0,
             fetcher=self.name,
             fetched_at=datetime.now(UTC),
             error=error,
+            flow_error=flow_error,
         )
 
     def _no_playwright(self, url: str):
@@ -567,6 +627,10 @@ class BrowserFetcher:
             or declined is not None,
         )
         html, read_error = _read_html(target, page)
+        # A step that failed with the refusal dialog up failed *because* of it. Reporting
+        # the selector instead sends someone to fix a config that is fine.
+        if flow_error and self._session_refused(page):
+            flow_error = "LOGGED_OUT"
         return RawCapture(
             url=redact_url(target.url),
             status_code=response.status if response else 0,
@@ -579,8 +643,19 @@ class BrowserFetcher:
             unavailable=declined,
         )
 
-    def _await_navigation(self, page, start_url: str, budget_ms: int = 6000) -> bool:
+    # How long to wait for a flow to take the whole tab. A probe that confirms a deposit
+    # gets the long budget; every other probe only gets long enough to catch a navigation
+    # nobody asked for, because polling out the full budget per probe was minutes of a run
+    # spent waiting for something that by design never happens.
+    NAV_BUDGET_MS = 6000
+    NAV_PEEK_MS = 900
+    # How long the refusal dialog is given to appear after a page load.
+    REFUSAL_GRACE_MS = 2500
+
+    def _await_navigation(self, page, start_url: str, budget_ms: int | None = None) -> bool:
         """Did the flow move the whole tab? Waits briefly, since navigation is async."""
+        if budget_ms is None:
+            budget_ms = self.NAV_BUDGET_MS if self._expects_navigation else self.NAV_PEEK_MS
         waited = 0
         while waited < budget_ms:
             if (page.url or "") != start_url:

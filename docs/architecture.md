@@ -318,6 +318,15 @@ around it. This distinction was a real defect: a site will serve the shell to an
 session and refuse only the embedded app, so the shallower check reported "signed in" and
 the first probe then reported being signed out.
 
+The frame appearing is still not the whole answer. Both brands embed the panel for a
+refused session too, render the full method list inside it, and then cover it with their
+own *"The session has expired"* dialog — drawn on the page, outside the frame the probes
+read. Nothing else sees that: the shell is the signed-in one and the URL never changes. So
+the check waits a moment longer and treats a visible refusal dialog as signed out
+(`session_expired:` in the site config, matched on visibility because the dialog's markup
+stays in the page after it closes). Untreated, this cost twelve minutes a run and reported
+every selector in the config as stale.
+
 **2. Sign in unattended.** With credentials in the environment, the run fills the form and
 submits in a hidden browser. If the site answers with a CAPTCHA or 2FA it stops there.
 

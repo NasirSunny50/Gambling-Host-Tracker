@@ -78,6 +78,12 @@ never clicks further, because the click after that one is the confirm.
   longer matches). A method the site has switched off — it answers the click with its own
   "unavailable" panel — leaves the fetch `ok` and is named in its note. Blame and
   completeness are separate: an incomplete fetch still never concludes an account is *gone*.
+- **"Every method broke at once" means the session, not the config.** Both brands answer a
+  dead session by serving the signed-in shell, embedding the panel, listing every method —
+  and covering the lot with their own "The session has expired" dialog, outside the frame
+  the probes read. The run now spots that dialog and goes back to sign in; before it did,
+  it walked every probe into it and reported "the config may be stale", which sends you to
+  fix selectors that are fine.
 - **These sites switch methods on and off constantly.** Two or three are usually off. That
   is the site, not the collector. A method can also disappear from the list entirely
   mid-session, as Melbet's Cellfin did.

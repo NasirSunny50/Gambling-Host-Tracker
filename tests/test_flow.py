@@ -1040,3 +1040,103 @@ def test_screenshots_can_be_switched_off_entirely():
 
     assert fetcher._shoot(page, page) is None
     assert page.full_page_shots == 0
+
+
+# ------------------------------------------- the panel that refuses an expired session
+
+
+REFUSAL = 'text="The session has expired"'
+
+
+class RefusingPage:
+    """A page whose payment frame loads and is then covered by the site's own dialog.
+
+    The case the logged-out marker cannot see: the shell is the signed-in one, the URL
+    never changes, the method list renders — and every click lands on a dialog drawn
+    outside the frame.
+    """
+
+    url = "https://bd.1xbet.com/en/office/recharge"
+
+    def __init__(self, refused: bool = True, visible: bool = True):
+        class Frame:
+            url = "https://bd.1xbet.com/paysystems/deposit/?h_token=x"
+
+        self.frames = [self, Frame()]
+        self.refused = refused
+        self.dialog_visible = visible
+        self.waited = 0
+
+    def content(self):
+        return "<div>account 177…</div>"
+
+    def query_selector(self, selector):
+        if selector == REFUSAL and self.refused:
+            return _Handle(self.dialog_visible)
+        return None
+
+    def wait_for_timeout(self, ms):
+        self.waited += ms
+
+
+class _Handle:
+    def __init__(self, visible: bool):
+        self._visible = visible
+
+    def is_visible(self):
+        return self._visible
+
+
+def test_a_refused_session_is_read_as_signed_out_not_as_a_broken_selector():
+    """The whole point: the frame is there, so every other signal says we are in."""
+    fetcher = BrowserFetcher(frame="/paysystems/deposit", session_expired=[REFUSAL])
+    _target, error = fetcher._target(RefusingPage())
+    assert error == "LOGGED_OUT"
+
+
+def test_the_dialog_only_counts_while_it_is_up():
+    """Its markup stays in the page after it closes. Believing presence would open a
+    sign-in window on every healthy run."""
+    fetcher = BrowserFetcher(frame="/paysystems/deposit", session_expired=[REFUSAL])
+    target, error = fetcher._target(RefusingPage(refused=True, visible=False))
+    assert error is None
+    assert target.url.endswith("h_token=x")
+
+
+def test_a_site_with_no_refusal_configured_is_unaffected():
+    fetcher = BrowserFetcher(frame="/paysystems/deposit")
+    _target, error = fetcher._target(RefusingPage())
+    assert error is None
+
+
+# ------------------------------------------------ waiting for a navigation nobody made
+
+
+class StillPage:
+    """A page that stays exactly where it was — every probe that does not confirm."""
+
+    def __init__(self):
+        self.url = "https://bd.1xbet.com/en/office/recharge"
+        self.waited = 0
+
+    def wait_for_timeout(self, ms):
+        self.waited += ms
+
+
+def test_a_probe_that_never_navigates_does_not_wait_out_the_navigation_budget():
+    """Paid once per probe, on every probe: fourteen of these was over a minute of a run
+    spent waiting for something that by design never happens."""
+    fetcher = BrowserFetcher()
+    fetcher._expects_navigation = False
+    page = StillPage()
+    assert fetcher._await_navigation(page, page.url) is False
+    assert page.waited <= BrowserFetcher.NAV_PEEK_MS
+
+
+def test_a_probe_that_confirms_a_deposit_still_gets_the_long_budget():
+    """That one really does hand off to the provider's site, and it is not quick."""
+    fetcher = BrowserFetcher()
+    fetcher._expects_navigation = True
+    page = StillPage()
+    assert fetcher._await_navigation(page, page.url) is False
+    assert page.waited >= BrowserFetcher.NAV_BUDGET_MS - 300
