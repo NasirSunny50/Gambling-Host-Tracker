@@ -704,7 +704,7 @@ def _runnable_sites() -> list[dict]:
     same dropdown. It runs the active sites one after another - never at once, because a
     fetch drives a real browser and two of them race on the login session.
     """
-    configs, _ = scan_sources()
+    configs, broken = scan_sources()
     active = [c for c in configs if c.status == "active"]
     everything = [
         {
@@ -714,7 +714,7 @@ def _runnable_sites() -> list[dict]:
             "fetcher": "",
         }
     ] if len(active) > 1 else []
-    return everything + [
+    sites = [
         {
             "slug": config.slug,
             "name": config.name,
@@ -723,6 +723,17 @@ def _runnable_sites() -> list[dict]:
         }
         for config in configs
     ]
+    # A config this process cannot parse must not make its site vanish from the dropdown.
+    # The usual cause is not a real typo but a portal still holding older code in memory
+    # after the config gained a field it does not know yet - and a fetch runs in a fresh
+    # subprocess that parses the file fine. So a broken file is still offered, keyed by its
+    # filename, rather than silently dropped.
+    known = {site["slug"] for site in sites}
+    for bad in broken:
+        slug = bad.path.stem
+        if slug not in known:
+            sites.append({"slug": slug, "name": slug, "status": "active", "fetcher": ""})
+    return everything + sites
 
 
 def _is_waiting(info) -> bool:

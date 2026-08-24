@@ -677,3 +677,25 @@ def test_the_overview_counts_and_charts_the_same_population():
     assert [c.name for c in figure.columns] == [c.name for c in bars.columns]
     assert "channel" in [c.name for c in figure.columns]
     assert "first_seen" in [c.name for c in figure.columns]
+
+
+def test_a_config_this_process_cannot_parse_still_lists_its_site(monkeypatch):
+    """The recurring footgun: a portal holding older code rejects a config that gained a
+    field it does not know, and the site vanished from the run dropdown - even though a
+    fetch, run in a fresh subprocess, parses the file fine. A broken file is now still
+    offered, keyed by its filename."""
+    from pathlib import Path
+
+    from ght.api import routes
+    from ght.sources import BrokenSource, SourceConfig, SourceUrl
+
+    good = SourceConfig(
+        slug="melbet-bd", name="Melbet", fetcher="browser",
+        urls=[SourceUrl(url="https://x.invalid/")],
+    )
+    broken = BrokenSource(path=Path("sources/1xbet-bd.yaml"), error="unknown field 'discover'")
+    monkeypatch.setattr(routes, "scan_sources", lambda *a, **k: ([good], [broken]))
+
+    slugs = {site["slug"] for site in routes._runnable_sites()}
+    assert "1xbet-bd" in slugs
+    assert "melbet-bd" in slugs
