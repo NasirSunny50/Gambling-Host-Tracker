@@ -100,7 +100,10 @@ never clicks further, because the click after that one is the confirm.
   so a scheduled fetch and a hand-started `ght run` cannot race on the login session.
 - **Rocket publishes twelve digits** — the wallet's mobile plus a check digit. The MSISDN
   pattern refuses that by design, so it is read as a wallet only when the block says Rocket,
-  and keyed on the eleven digits that identify it.
+  and **all twelve are kept** (`018046326747` → `+88018046326747`) — the number the site
+  prints is what gets blocklisted. The twelfth digit is derived from the first eleven, so it
+  cannot cause a collision; the operator is read off the mobile. Older rows keyed on eleven
+  were migrated up where a twelve-digit sighting existed.
 
 ## The portal
 

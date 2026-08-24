@@ -71,7 +71,7 @@ def _normalize_candidate(candidate: Candidate, ignored: set[str]) -> NormalizedA
         # Rocket alone publishes twelve digits - the wallet's mobile number plus a check
         # digit - which the MSISDN pattern refuses on purpose, since biting eleven digits
         # out of a longer run is how a bank account becomes a phone number. Only a block
-        # that says it is Rocket may read it that way.
+        # that says it is Rocket may read it that way, and it keeps all twelve.
         rocket = normalize_rocket(candidate.raw_text)
         if rocket:
             msisdns = [rocket]

@@ -105,13 +105,11 @@ _ROCKET_PATTERN = re.compile(
 )
 
 
-def normalize_rocket(raw: str) -> str | None:
-    """The mobile number inside a 12-digit Rocket wallet, or ``None`` if it is not one.
+def _rocket_national(raw: str) -> str | None:
+    """The twelve national digits of a Rocket wallet — ``0`` + mobile + check — or None.
 
-    Returns the same ``+8801XXXXXXXXX`` form every other channel is keyed on, so a Rocket
-    wallet de-duplicates against itself across runs and sites. The check digit is not
-    thrown away - the observation keeps the published string verbatim in ``raw_text``,
-    which is what the evidence has to show.
+    The first eleven must themselves be a valid mobile, which is what tells a Rocket wallet
+    apart from a bank account that happens to run to twelve digits.
     """
     if not raw:
         return None
@@ -124,14 +122,36 @@ def normalize_rocket(raw: str) -> str | None:
         digits = "0" + digits[3:]
     elif digits.startswith("88"):
         digits = "0" + digits[2:]
-    if len(digits) != 12:
+    if len(digits) != 12 or normalize_msisdn(digits[:11]) is None:
         return None
-    return normalize_msisdn(digits[:11])
+    return digits
+
+
+def normalize_rocket(raw: str) -> str | None:
+    """The full 12-digit Rocket wallet in canonical form, or ``None`` if it is not one.
+
+    Rocket (Dutch-Bangla) publishes the wallet as the holder's mobile with a check digit
+    appended — twelve digits where every other MFS shows eleven. The published number *is*
+    the account, so all twelve are kept: a blocklist has to carry what the site prints, not
+    a truncation of it. The form is the same ``+880…`` shape as every other channel, with
+    the trunk ``0`` replaced by the country code, so ``018046326747`` is keyed as
+    ``+88018046326747``. Two wallets still cannot collide on it, because the twelfth digit
+    is derived from the first eleven rather than free to vary.
+    """
+    digits = _rocket_national(raw)
+    if digits is None:
+        return None
+    return "+880" + digits[1:]
 
 
 def operator_of(msisdn: str) -> str | None:
-    """Map a normalized MSISDN to its mobile operator, or ``None`` if unrecognised."""
+    """Map a normalized number to its mobile operator, or ``None`` if unrecognised."""
     normalized = normalize_msisdn(msisdn)
-    if not normalized:
+    if normalized is None:
+        # A Rocket wallet is a mobile with a check digit past it, so it never parses as an
+        # MSISDN — but its operator is still the mobile's, read off the same prefix.
+        national = _rocket_national(msisdn)
+        normalized = normalize_msisdn(national[:11]) if national else None
+    if normalized is None:
         return None
     return OPERATOR_PREFIXES.get(normalized[3:6])

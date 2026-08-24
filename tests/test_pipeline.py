@@ -408,7 +408,7 @@ def _payee_fixture(session, tmp_path, monkeypatch):
     accounts = {}
     for channel, number in (
         ("cellfin", "+8801351752316"),
-        ("rocket", "+8801628796018"),
+        ("rocket", "+88016287960189"),
         ("upay", "+8801853678501"),
     ):
         account = Account(channel=channel, account_number=number, bank_key="")
@@ -440,8 +440,8 @@ def test_a_payee_gets_the_picture_of_its_own_method(session, tmp_path, monkeypat
 
 
 def test_a_rocket_wallet_matches_the_check_digit_the_page_prints(session, tmp_path, monkeypatch):
-    """Rocket publishes twelve digits and the account is keyed on the eleven that identify
-    it, so the page never contains the stored string exactly."""
+    """Rocket publishes twelve digits and the account keeps all of them, so the canonical
+    +880 form carries the check digit the page prints."""
     from ght.api.routes import _probe_of, _screenshot_for
 
     accounts = _payee_fixture(session, tmp_path, monkeypatch)

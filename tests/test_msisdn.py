@@ -68,3 +68,36 @@ def test_operator_lookup():
     assert operator_of("01512345678") == "Teletalk"
     assert operator_of("01612345678") == "Robi"
     assert operator_of("nonsense") is None
+
+
+# ------------------------------------------------------------ Rocket's twelfth digit
+
+
+def test_a_rocket_wallet_keeps_all_twelve_digits():
+    """Rocket prints the mobile with a check digit on the end. The published number is what
+    a blocklist has to carry, so all twelve are kept rather than truncated to the mobile."""
+    from ght.normalize.msisdn import normalize_rocket
+
+    assert normalize_rocket("018046326747") == "+88018046326747"
+    assert normalize_rocket("016287960189") == "+88016287960189"
+
+
+def test_a_rocket_wallet_reads_its_operator_off_the_mobile():
+    """The check digit past the mobile means it never parses as a plain MSISDN, but the
+    operator is still the mobile's."""
+    assert operator_of("+88018046326747") == "Robi"
+    assert operator_of("+88014087955515") == "Banglalink"
+
+
+def test_a_plain_eleven_digit_number_is_not_a_rocket_wallet():
+    """Only the twelve-digit form is a Rocket wallet; an eleven-digit one is an ordinary
+    mobile and goes through the MSISDN path instead."""
+    from ght.normalize.msisdn import normalize_rocket
+
+    assert normalize_rocket("01945896625") is None
+
+
+def test_a_thirteen_digit_bank_account_is_not_mistaken_for_rocket():
+    from ght.normalize.msisdn import normalize_rocket
+
+    assert normalize_rocket("0181234567890") is None

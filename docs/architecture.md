@@ -294,8 +294,10 @@ Two domain details that cost real bugs:
 - **Rocket publishes twelve digits** — the wallet's mobile number with a check digit
   appended. The MSISDN pattern refuses that by design, so the number was being dropped
   entirely. It is now read as a wallet *only* when the configured block says the channel is
-  Rocket, and keyed on the mobile, which is the identity; the printed string is preserved
-  verbatim on the observation.
+  Rocket, and **all twelve digits are kept** (`018046326747` → `+88018046326747`): the
+  published number is what a blocklist has to carry, not a truncation of it. Two wallets
+  still cannot collide, because the twelfth digit is derived from the first eleven; the
+  operator is read off the mobile, which the check digit sits past.
 - **A number claimed by a selector is off-limits to the sweep.** The sweep decides a
   channel by proximity, which is often the *next* block's heading; without this rule one
   bKash wallet was also stored as a phantom Nagad account.
