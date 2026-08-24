@@ -4,144 +4,169 @@ I'm continuing work on **Gambling Host Tracker** at
 `D:\Projects\Personal\Gambling Host Tracker` (git repo, pushed to
 `github.com/NasirSunny50/Gambling-Host-Tracker`, branch `main`, all work committed).
 
-Read `README.md` first — it covers the architecture. Read code only as you need it; don't
-survey the whole tree.
+Read `docs/architecture.md` first — it is the current architecture and technology
+document, and `README.md` after it if you need the operational detail. Read code only as
+you need it; don't survey the whole tree.
 
 ## What it does
 
 Collects the mobile-wallet and bank account numbers gambling sites publish for deposits, so
 a bank's AML team can blocklist them. Numbers rotate daily, so it keeps every sighting and
-stores the page it came from, hashed, as evidence. Two targets: `1xbet-bd` and `melbet-bd`,
-which run the same platform - same login form, same embedded panel, same modal markup -
-under different method ids.
+stores the page it came from, hashed, as evidence. Two targets, `1xbet-bd` (5 probes) and
+`melbet-bd` (14 probes), running the same platform — same login form, same embedded panel,
+same modal markup — under different method ids.
+
+About 94 accounts and 26 distinct merchant names collected so far, over 132 fetches.
 
 ## How to run things
 
 ```
-.venv\Scripts\python.exe -m pytest -q         # 230 tests, all offline
-.venv\Scripts\python.exe -m ruff check src tests
+.venv\Scripts\python.exe -m pytest -q         # 267 tests, all offline, ~15s
+.venv\Scripts\python.exe -m ruff check src tests docs
 scripts\Start.bat                             # portal on http://127.0.0.1:8000
+.venv\Scripts\python.exe docs\build_pdf.py    # regenerate the architecture PDF
 ```
 
-Always use `.venv\Scripts\python.exe`, never the system Python. Kill stale servers before
-restarting or the port stays bound and you'll test old code:
-`Get-CimInstance Win32_Process -Filter "Name='python.exe'" | Where-Object { $_.CommandLine -match 'ght\.cli' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }`
+Always use `.venv\Scripts\python.exe`, never the system Python.
+
+**A running portal holds its Python modules in memory.** Editing a file changes nothing for
+a process that is already up — this cost a round trip once, with a fix that was already
+committed. Restart the portal after touching anything under `src/`, and kill the old one
+first or the port stays bound:
+
+```
+Get-CimInstance Win32_Process -Filter "Name='python.exe'" | Where-Object { $_.CommandLine -match 'ght|serve' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
+```
 
 Note: every `ght.cli` command shows as **two** python processes (a parent and its child).
-That is one logical process, not two servers — don't chase it.
+That is one logical process, not two servers — don't chase it. And a Playwright run that is
+killed mid-flight leaves headless browsers behind; they hold sockets and make the next fetch
+look like a network failure. Clear them by matching `Temp\playwright` in the command line.
 
-## How collection works
+## How a fetch works
 
-Portal → **Runs** → *Start run*, or on a schedule. One run:
+Portal → **Fetches** → *Fetch accounts now*, or on a schedule. One fetch:
 
-1. **Signs in.** Checks the saved session; if dead, tries an unattended login with
-   credentials from `.env`, and only opens a visible window when the site answers with a
-   CAPTCHA or 2FA. 1xBet challenges nearly every sign-in, so expect the window.
-2. **Walks 5 probes inside one loaded panel** — the panel takes 10–13s to start and every
+1. **Signs in.** Checks the saved session by loading the page the fetch actually needs — not
+   the shell around it, which a dead session is still served. If dead, tries an unattended
+   login with credentials from `.env`, and only opens a visible window when the site answers
+   with a CAPTCHA or 2FA. Both sites challenge nearly every sign-in, so expect the window.
+2. **Walks every probe inside one loaded panel** — the panel takes 10–13s to start and every
    probe needs the same one, so it is opened once. Between probes the modal is closed and
    *proven* closed (`reset:` in the yaml); anything less reloads.
 3. **Saves** accounts, name-only payees, and evidence (HTML + screenshot, SHA-256).
 
-Takes ~80s. Live progress streams from the subprocess (`ght/progress.py`, marker-prefixed
-JSON lines) and renders as a 3-step checklist.
+1xBet takes ~80s. Melbet takes seven or eight minutes, almost all of it waiting out refused
+connections (see below). Live progress streams from the subprocess (`ght/progress.py`,
+marker-prefixed JSON lines) and renders as a 3-step checklist.
+
+The site dropdown offers **All sites**, which walks the active ones one after another — never
+at once, by handing the CLI no `--site`. With several sites the checklist restarts its three
+phases per site, so each is announced as "Site 1 of 2: <name>".
 
 Per-site config is `sources/<slug>.yaml`. Site markup drifts often; a stale selector is a
 config fix, not a code fix. The `notes:` block at the bottom holds the recon history.
 
 `ght recon --site <slug>` is how a site gets configured or repaired: it signs in the way a
-run does and prints every method with its id, every dropdown with its exact option labels,
-and - with `--open <method-id>` - the elements in one method's panel. It opens a method and
+fetch does and prints every method with its id, every dropdown with its exact option labels,
+and — with `--open <method-id>` — the elements in one method's panel. It opens a method and
 never clicks further, because the click after that one is the confirm.
 
 ## Things that will confuse you if you don't know them
 
-- **`ok` vs `partial`.** A run is degraded only by *our* breakage (a selector that no longer
-  matches). A method 1xBet has switched off — it answers the click with its own
-  "unavailable" panel — leaves the run `ok` and is named in the run's note. Blame and
-  completeness are separate: an incomplete run still never concludes an account is *gone*.
-- **1xBet switches methods on and off constantly.** Two or three of the five are usually
-  off. That is the site, not the collector.
+- **`ok` vs `partial`.** A fetch is degraded only by *our* breakage (a selector that no
+  longer matches). A method the site has switched off — it answers the click with its own
+  "unavailable" panel — leaves the fetch `ok` and is named in its note. Blame and
+  completeness are separate: an incomplete fetch still never concludes an account is *gone*.
+- **These sites switch methods on and off constantly.** Two or three are usually off. That
+  is the site, not the collector. A method can also disappear from the list entirely
+  mid-session, as Melbet's Cellfin did.
 - **A payee is a payee.** Some methods hand off to the provider's checkout, which names a
-  business and publishes no number. Those are counted, charted, listed, exported and given
-  a detail page exactly like numbered accounts — the screenshot of the page that named them
-  is the whole of their evidence. Anything that counts payees counts both.
-- **`candidates_found`** on a run means *payees brought back* (de-duplicated accounts +
+  business and publishes no number. Those are counted, charted, listed, exported and given a
+  detail page exactly like numbered accounts. Anything that counts payees counts both.
+- **`candidates_found`** on a fetch means *payees brought back* (de-duplicated accounts +
   distinct names). Rows written before 2026-08-22 hold raw extraction hits and exclude
   name-only payees.
-- **One fetch at a time, machine-wide.** The collector holds `data/run.lock` (pid +
-  slug), so a scheduled run and a hand-started `ght run` cannot race on the login session.
+- **`started_at` before 2026-08-23** was stamped when the row was written, which is after
+  collection returns — so older fetches all look instantaneous. Newer ones carry the true
+  start.
+- **One fetch at a time, machine-wide.** The collector holds `data/run.lock` (pid + slug),
+  so a scheduled fetch and a hand-started `ght run` cannot race on the login session.
+- **Rocket publishes twelve digits** — the wallet's mobile plus a check digit. The MSISDN
+  pattern refuses that by design, so it is read as a wallet only when the block says Rocket,
+  and keyed on the eleven digits that identify it.
 
 ## The portal
 
 **What it is called.** The portal never says "collection run": one pass over a site is an
-**account fetch**, the sidebar item is **Fetches**, the button is **Fetch accounts now**,
-and the history is the **fetch history**. The code still calls the machinery the collection
-pipeline and the table is still `collection_runs` - the rename is the vocabulary a reader
+**account fetch**, the sidebar item is **Fetches**, the button is **Fetch accounts now**, and
+the history is the **fetch history**. The code still calls the machinery the collection
+pipeline and the table is still `collection_runs` — the rename is the vocabulary a reader
 sees, not an identifier sweep. Keep new user-facing wording on "fetch".
-
 
 Sidebar: Overview, Payees, Fetches. Theme toggle in the header. `/components` documents the
 recurring UI elements and the reasoning (not linked in the nav).
 
-- **Overview** — accounts found, collections run, sites tracked; accounts by channel;
-  newest payees. All read the same query the Payees page reads, so they cannot drift apart.
-- **Payees** — one list of both kinds. Search + channel filter, per-page, CSV and PDF
-  export. No status column, no confidence: the row says which site it came from.
-- **Detail** — one screenshot of the number on the site, plus the sightings.
+- **Overview** — payees found, fetches run, sites tracked; payees by channel; newest payees.
+  All read the same query the Payees page reads, so they cannot drift apart.
+- **Payees** — one list of both kinds. Search + channel filter, per-page, CSV and PDF export.
+  Copy icons sit on the number and on the holder name.
+- **Payee detail** — the identity, the sightings, and one screenshot **of the panel that
+  published that number**. Which screenshot that is has to be established, not assumed: see
+  `_screenshot_for` in `api/routes`. Where no stored page can be shown to carry the number,
+  no picture is shown — another method's screenshot is evidence of the wrong thing.
 - **Fetches** — manual card and schedule card side by side, then paged fetch history. The
-  outcome card after a run shows once and stands down on reload. A row opens
-  `/runs/<id>`: when it went and how long it took, what it brought back, and the pages
-  it stored as evidence, one row per method.
+  outcome card shows once and stands down on reload. A row opens `/runs/<id>`: when it went,
+  how long it took, and what it brought back, with the payees **never seen before marked on
+  their own rows**. Evidence is still captured and hashed but is not surfaced here.
 
 Dates are Bangladesh format and +06:00 everywhere (`_stamp` / `_day` in `api/routes`).
 
-## Recent work (this is all done and pushed)
+## The schedule
 
-Design pass implemented; sign-in automated as far as the site allows; collection 492s → 76s
-by sharing one panel; blame separated from completeness with the reason stated on the run;
-name-only payees given a page, a screenshot and a place in every count; scheduler added
-(`api/schedule.py`, `data/schedule.json`, floor 5 min, first run immediate, skips a slot if
-one is still running, survives restart); PDF export (`export/report.py`) with per-page
-header, footer, provenance and page numbers; drawn icons throughout.
+`api/schedule.py`, state in `data/schedule.json`. One interval for one target (a slug, or
+`all`), a thread that wakes and asks the same run manager the button asks. Floor 5 minutes,
+ceiling 24 hours, skips a slot if a fetch is still running and records why, survives a
+restart.
 
-## Melbet, as of 2026-08-23
+**It never fetches on the spot.** Not when the schedule is set, and not when the portal
+comes back up with an overdue slot — both used to, and both were surprises that cost a
+deposit request. The next fetch is always one interval away.
 
-Thirteen numbered payees and one name, collected in one run of fourteen probes: CellFin
-Free, Nagad, Rocket, uPay, Nagad Free (which prints the business name beside the number),
-Trust Axiata Pay, Rocket Free, iPay, Nexus Pay, and Bank Transfer once per bank in its
-dropdown (UCB, Pubali, Dutch-Bangla, Islami). `nagad-paykassma` is the fourteenth and the
-only one that costs a deposit request.
+## Melbet notes
 
-Three things about that site are worth knowing before touching it:
+Thirteen numbered payees and one name, from fourteen probes: CellFin Free, Nagad, Rocket,
+uPay, Nagad Free (which prints the business name beside the number), Trust Axiata Pay,
+Rocket Free, iPay, Nexus Pay, and Bank Transfer once per bank in its dropdown (UCB, Pubali,
+Dutch-Bangla, Islami). `nagad-paykassma` is the fourteenth and the only one that costs a
+deposit request; it is three documents deep — panel, then paykassma's iframe, then Nagad's
+own checkout — which is why a flow step can name the frame it acts in.
 
-- **The network drops it in bursts.** Connections to the host are refused for minutes at a
-  time and then work again - a local filter, not the site. The browser fetcher retries a
-  refused load `MAX_RETRIES` times, 8s apart; this machine's `.env` is set to 6, and a run
-  still takes seven or eight minutes rather than the ~80s 1xBet takes.
-- **Cellfin under Bank transfer vanished mid-recon** - present at 12:10, gone by 13:00. No
-  probe is configured for it; its id is in the yaml if it comes back.
-- **Rocket publishes twelve digits**, the wallet's mobile plus a check digit. The extractor
-  keys it on the mobile and only reads it that way when the block says Rocket.
+**The network drops this host in bursts.** Connections are refused at the TLS layer for
+minutes at a time and then work again — local filtering, not the site. The browser fetcher
+retries a refused load `MAX_RETRIES` times, 8s apart; this machine's `.env` is set to 6.
 
 ## Known open items
 
 - **Brand logos are local, not in git.** `data/branding/` is gitignored and ships empty —
-  bKash/Nagad/Upay own their marks and an approximation would be a counterfeit. This
-  machine has bKash, Nagad, Upay and Bank transfer dropped in, so the portal shows them;
-  a fresh clone shows the lettered mark until someone supplies files. Filenames are matched
-  loosely (case, spaces and hyphens), so a download goes in as-is. Rocket, Tap and mCash
-  have no file yet. The PDF export carries no logos, only the channel label.
+  the providers own their marks and an approximation would be a counterfeit. This machine
+  has bKash, Nagad, Upay and Bank transfer dropped in. Filenames are matched loosely (case,
+  spaces, hyphens), so a download goes in as-is. Rocket, Tap, mCash, CellFin and iPay have
+  no file yet. The PDF export carries no logos, only the channel label.
 - **Bengali payee names in PDFs** need a Unicode font on the machine (Nirmala on Windows).
-  Without one the report prints `?` rather than wrong glyphs. No Bengali names in the data
-  yet, so this path is untested against real data.
+  Without one the report prints `?` rather than wrong glyphs. Untested against real data.
+- **Alert delivery is not built.** Alerts are detected and stored; no sender exists.
 - Portal has **no authentication** and binds to loopback. It must sit behind an
   authenticating proxy before production. Don't bind it to `0.0.0.0`.
+- Older screenshots are full-page captures; `shot:` in the site config now frames the panel
+  instead. Existing evidence is left exactly as it was taken.
 - `demo-site` rows (3 failed fixture runs) are still in the database; harmless.
 
 ## Working agreements
 
 - Verify against the real thing rather than assuming — run it, screenshot it, check the DB.
-  Several bugs this month were only visible in a live run.
+  Several bugs this month were only visible in a live run, and one wrong-screenshot bug was
+  only visible by comparing what the page showed against what the database stored.
 - Tests must stay offline and pass before committing.
 - A CAPTCHA is never defeated or worked around; when one appears, a person clears it.
   Credentials the operator puts in `.env` may be filled into the site's own login form, and
@@ -151,4 +176,5 @@ Three things about that site are worth knowing before touching it:
 - Commit and push after each working change, with a message explaining *why*.
 - Two probes reach their payee by confirming a deposit, which initiates a real (unpaid)
   deposit request on the operator: `fast-nagad` on 1xBet and `nagad-paykassma` on Melbet.
-  Both are marked `creates_order`. Ask before starting a run that includes one.
+  Both are marked `creates_order`. **Ask before starting a fetch that includes one** — and
+  note that "All sites" includes both.
