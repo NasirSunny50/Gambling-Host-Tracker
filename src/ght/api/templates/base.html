@@ -5,11 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   {% if auto_refresh %}<meta http-equiv="refresh" content="5">{% endif %}
   <title>{% block title %}Host Tracker{% endblock %}</title>
-  {# The sidebar's mark, redrawn in solid shapes and inlined so the tab icon needs no
-     second request and works on a machine with no network. Solid rather than stroked:
-     a tab renders this at sixteen pixels, where the sidebar's hairlines turn to mud.
-     Colours are literal too - the CSS variables do not exist inside a favicon. #}
-  <link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20viewBox%3D%270%200%2032%2032%27%3E%3Crect%20width%3D%2732%27%20height%3D%2732%27%20rx%3D%277%27%20fill%3D%27%232f6fed%27%2F%3E%3Cg%20transform%3D%27translate%284%204%29%27%3E%3Cpath%20d%3D%27M12%202l8%203.2v5.3c0%204.9-3.3%208.5-8%2010.1-4.7-1.6-8-5.2-8-10.1V5.2L12%202z%27%20fill%3D%27%23fff%27%2F%3E%3Ccircle%20cx%3D%2712%27%20cy%3D%2710.6%27%20r%3D%274.3%27%20fill%3D%27%232f6fed%27%2F%3E%3Cpath%20d%3D%27M12%2010.6L15.5%207.9L16.2%208.8L12.7%2011.5Z%27%20fill%3D%27%23fff%27%2F%3E%3Ccircle%20cx%3D%2712%27%20cy%3D%2710.6%27%20r%3D%271.9%27%20fill%3D%27%23fff%27%2F%3E%3C%2Fg%3E%3C%2Fsvg%3E">
+  {# The product logo, served from the package as a small PNG cut of the full badge. #}
+  <link rel="icon" type="image/png" href="/favicon.png">
   <script>
     // Read the stored theme before first paint, so a dark-mode operator never sees a
     // white flash on navigation. Inline on purpose: nothing else may load first.
@@ -73,8 +70,9 @@
     .side-brand { padding:18px 18px 14px; border-bottom:1px solid var(--border);
                   display:flex; align-items:center; gap:10px; color:var(--text); }
     .side-brand:hover { text-decoration:none; background:var(--surface-2); }
-    .side-brand .mark { width:32px; height:32px; border-radius:8px; background:var(--accent);
-                        display:inline-flex; align-items:center; justify-content:center; flex:none; }
+    .side-brand .mark { width:32px; height:32px; border-radius:8px; overflow:hidden; flex:none;
+                        display:inline-flex; align-items:center; justify-content:center; }
+    .side-brand .mark img { width:100%; height:100%; display:block; }
     .side-brand .who { display:flex; flex-direction:column; line-height:1.15; }
     .side-brand strong { font-size:14px; letter-spacing:-.2px; }
     .side-brand .tagline { font-size:11px; color:var(--text-3); }
@@ -324,14 +322,7 @@
 <body>
   <aside class="side">
     <a class="side-brand" href="/" title="Overview">
-      <span class="mark">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-          <path d="M12 2.5l7.5 3v5c0 4.6-3.1 8-7.5 9.5-4.4-1.5-7.5-4.9-7.5-9.5v-5l7.5-3z" fill="none" stroke="var(--accent-text)" stroke-width="1.6" stroke-linejoin="round"/>
-          <circle cx="12" cy="11" r="4.4" fill="none" stroke="var(--accent-text)" stroke-width="1.4"/>
-          <circle cx="12" cy="11" r="1.7" fill="var(--accent-text)"/>
-          <path d="M12 11l3.4-2.6" stroke="var(--accent-text)" stroke-width="1.4" stroke-linecap="round"/>
-        </svg>
-      </span>
+      <span class="mark"><img src="/logo" alt="" aria-hidden="true"></span>
       <span class="who"><strong>Host Tracker</strong><span class="tagline">Payee intelligence</span></span>
     </a>
     <nav>

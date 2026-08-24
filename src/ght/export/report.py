@@ -15,6 +15,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta, timezone
 from io import BytesIO
+from pathlib import Path
+
+# The product logo, shipped with the api package; the report shares it with the portal so
+# the two cannot drift apart.
+LOGO_PATH = Path(__file__).resolve().parents[1] / "api" / "assets" / "logo-badge.png"
 
 # Bangladesh keeps one offset all year, so it needs no tz database to be right.
 DHAKA = timezone(timedelta(hours=6))
@@ -27,7 +32,6 @@ INK = (0.11, 0.13, 0.16)
 QUIET = (0.42, 0.46, 0.51)
 RULE = (0.80, 0.83, 0.87)
 BAND = (0.945, 0.955, 0.965)
-ACCENT = (0.184, 0.435, 0.929)
 
 
 
@@ -44,8 +48,6 @@ UNICODE_FONT_CANDIDATES = (
 
 def _register_body_font() -> str:
     """Return the font to set text in: a Unicode face if one is installed."""
-    from pathlib import Path
-
     from reportlab.pdfbase import pdfmetrics
     from reportlab.pdfbase.ttfonts import TTFont
 
@@ -138,34 +140,13 @@ class _Report:
         c, w, h = self.c, self.width, self.height
         left, right = self.PAGE_MARGIN, w - self.PAGE_MARGIN
 
-        # The mark, drawn rather than embedded so the report needs no asset alongside it.
-        # The same shield-and-scope emblem the portal shows: white line-art on the accent
-        # square, redrawn here in ReportLab primitives rather than carried as an image.
-        c.setFillColorRGB(*ACCENT)
-        c.roundRect(left, h - 46, 22, 22, 5, stroke=0, fill=1)
-
-        cx, cy = left + 11, h - 35  # centre of the 22pt mark
-        c.setStrokeColorRGB(1, 1, 1)
-        c.setLineWidth(1.3)
-        c.setLineJoin(1)
-        c.setLineCap(1)
-
-        # Shield outline: flat top, shoulders, tapering to a point.
-        shield = c.beginPath()
-        shield.moveTo(cx - 6.5, cy + 6.5)
-        shield.lineTo(cx + 6.5, cy + 6.5)
-        shield.lineTo(cx + 6.5, cy + 0.5)
-        shield.lineTo(cx, cy - 7.5)
-        shield.lineTo(cx - 6.5, cy + 0.5)
-        shield.close()
-        c.drawPath(shield, stroke=1, fill=0)
-
-        # Scope: a ring, a filled centre, and a pointer out of it.
-        c.setLineWidth(1.1)
-        c.circle(cx, cy + 1.3, 3.6, stroke=1, fill=0)
-        c.setFillColorRGB(1, 1, 1)
-        c.circle(cx, cy + 1.3, 1.4, stroke=0, fill=1)
-        c.line(cx, cy + 1.3, cx + 3.1, cy + 3.6)
+        # The product logo, the same badge the portal shows. Drawn from the shipped PNG so
+        # the report and the portal cannot drift apart; if the asset is somehow missing the
+        # header simply carries no mark rather than failing the export.
+        if LOGO_PATH.exists():
+            c.drawImage(
+                str(LOGO_PATH), left, h - 46, 22, 22, mask="auto", preserveAspectRatio=True
+            )
 
         c.setFillColorRGB(*INK)
         c.setFont("Helvetica-Bold", 12)

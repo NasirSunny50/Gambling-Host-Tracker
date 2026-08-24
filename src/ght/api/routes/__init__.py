@@ -26,7 +26,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy import String, func, literal, select, union_all
 from sqlalchemy.orm import Session
 
-from ght.api import TEMPLATES_DIR
+from ght.api import ASSETS_DIR, TEMPLATES_DIR
 from ght.api.jobs import ALL_SITES, manager
 from ght.api.schedule import MIN_MINUTES, Scheduler
 from ght.config import REPO_ROOT, settings
@@ -199,6 +199,18 @@ def channel_logo(channel: str) -> str | None:
 
 
 templates.env.globals["channel_logo"] = channel_logo
+
+
+@router.get("/logo")
+def logo():
+    """The product's own logo — the shield-and-scope badge the sidebar shows."""
+    return FileResponse(ASSETS_DIR / "logo-badge.png", media_type="image/png")
+
+
+@router.get("/favicon.png")
+def favicon():
+    """The same badge, cut down for the browser tab."""
+    return FileResponse(ASSETS_DIR / "favicon.png", media_type="image/png")
 
 
 @router.get("/branding/{channel}")

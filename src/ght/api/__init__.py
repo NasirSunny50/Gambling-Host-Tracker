@@ -9,6 +9,10 @@ from __future__ import annotations
 from pathlib import Path
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
+# The product's own logo, shipped with the package so it serves regardless of the working
+# directory. `logo-badge.png` is the full 1024px mark; `favicon.png` a 128px cut for the
+# tab, small enough to fetch cheaply before it is cached.
+ASSETS_DIR = Path(__file__).parent / "assets"
 
 
 def create_app():
