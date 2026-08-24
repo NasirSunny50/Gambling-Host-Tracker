@@ -57,10 +57,11 @@ Portal → **Fetches** → *Fetch accounts now*, or on a schedule. One fetch:
 3. **Runs any discoveries** on that same panel (`discover:` in the yaml) — families of
    methods found at run time rather than named: every E-wallets cell whose name carries a
    channel word (so new bKash/Nagad/Upay modules are collected without a config edit), and
-   every option of the Bank Transfer dropdown. A discovery only opens a modal, never
-   confirms, so it can never start an order. 1xBet uses both; see `docs/architecture.md`
-   §6.2. The 1xBet `discover: bank` and `lightspeed-bkash` selectors are modelled, not yet
-   seen live — the notes in the yaml say what to confirm on the first run.
+   the Bank Transfer method (walked as a cell — 1xBet dropped its recipient-bank dropdown).
+   The `options` kind, which iterates a dropdown's options, exists for the case a site still
+   has one. A discovery only opens a modal, never confirms, so it can never start an order.
+   See `docs/architecture.md` §6.2. The 1xBet `bank-transfer` and `lightspeed-bkash`
+   selectors are modelled, not yet seen live — the yaml notes say what to confirm.
 4. **Saves** accounts, name-only payees, and evidence (HTML + screenshot, SHA-256).
 
 1xBet takes ~80s. Melbet takes seven or eight minutes, almost all of it waiting out refused

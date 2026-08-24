@@ -153,21 +153,20 @@ discover:
     container: ".modal-payment.active"
     value: ".modal-payment.active .payment_modal_input--html, .modal-payment.active .modal-message-address"
 
-  # Bank Transfer lists its recipient banks in a dropdown. Walk every option rather than
-  # naming the banks, so a bank added or dropped is picked up on the next run. Each option
-  # fills the modal in place with that bank's account, and the option label is the bank.
-  # The exact select/value selectors are modelled on the sister site and want a live check.
-  - name: bank
-    kind: options
+  # Bank Transfer no longer offers a recipient-bank dropdown - it opens straight to a single
+  # account, the way Internet Banking does. So it is walked as a cell rather than by
+  # iterating options: every cell in the Bank transfer section is opened and its account
+  # read, under a fixed bank_transfer channel (the section's names carry no channel word to
+  # infer from). If the method is switched off, or gone from the list entirely, this simply
+  # finds no cell and yields nothing.
+  - name: bank-transfer
+    kind: cells
+    items: '.section-block:has(.section_name_title:has-text("Bank transfer")) .payment-cell'
+    label: ".payment-cell-name__caption--is-title"
     channel: bank_transfer
-    open:
-      - click: '.section-block:has(.section_name_title:has-text("Bank transfer")) .payment-cell[data-method="bt_bangla"]'
-        wait_for: ".modal-payment.active select"
-    items: ".modal-payment.active select"
-    skip_options: ["", "Select recipient's bank", "Select"]
-    wait_for: ".modal-payment.active .modal-message-address"
+    wait_for: ".modal-payment.active .payment_modal_input--html, .modal-payment.active .modal-message-address"
     container: ".modal-payment.active"
-    value: ".modal-payment.active .modal-message-address"
+    value: ".modal-payment.active .payment_modal_input--html, .modal-payment.active .modal-message-address"
 
 ignore_numbers: []
 
@@ -248,9 +247,10 @@ notes: |
   panel (number in `.payment_modal_input--html`, sometimes `.modal-message-address`).
 
   Still wants a live check the first time it runs (all modelled, none seen live yet):
-    - `discover: bank` — the Bank Transfer dropdown. `bt_bangla` is back in the list; the
-      select selector (`.modal-payment.active select`), the placeholder to skip, and the
-      value/holder rows are modelled on the sister site's panel, not yet confirmed here.
+    - `discover: bank-transfer` — Bank Transfer no longer has the recipient-bank dropdown
+      the earlier recon saw; the operator confirms it now opens straight to one account, so
+      it is walked as a cell, not by iterating a `<select>`. The value selector is the same
+      bt3 pair the e-wallets use; confirm the account actually renders there.
     - `lightspeed-bkash` — its redirect destination selector is copied from `fast-nagad`.
       creates_order, so it only runs when the operator agrees.
     - The Local Nagad (interkassa2) — never walked before; its modal may print a number or
