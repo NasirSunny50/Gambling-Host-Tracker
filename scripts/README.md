@@ -6,8 +6,13 @@ Double-click it. That is the whole workflow.
 
 It sets up the environment on first use (creates the virtualenv, installs dependencies,
 downloads the browser), stops any portal still running from an earlier launch so the port
-is free and the current code runs, starts the portal at `http://127.0.0.1:8000`, and opens
-it in your browser. Keep the window open while you work.
+is free and the current code runs, starts the portal (`http://127.0.0.1:8000`, or the next
+free port if 8000 is taken — the exact address is printed in the window), and opens it in
+your browser. Keep the window open while you work.
+
+If port 8000 is unavailable even after the old portal is stopped — Windows can bind-reserve
+it for Hyper-V / WSL / Docker, with nothing to kill — the portal simply moves to the next
+free port and opens the browser there. Nothing to do.
 
 Collect from the **Runs** page. If the site needs a sign-in, a browser window opens for you
 — sign in there, solving the CAPTCHA yourself, and collection continues by itself.

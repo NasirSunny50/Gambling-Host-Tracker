@@ -17,7 +17,9 @@ echo.
 echo ============================================================
 echo   Host Tracker
 echo ============================================================
-echo Opening http://127.0.0.1:8000 in your browser.
+echo Starting the portal and opening it in your browser.
+echo The exact address is printed just below (usually
+echo http://127.0.0.1:8000; a busy port shifts it to the next one).
 echo.
 echo On the Runs page, press "Run collection". If the site needs a
 echo sign-in, a browser window opens for you - sign in there and
@@ -26,10 +28,9 @@ echo.
 echo Keep this window open. Close it (or press Ctrl+C) to stop.
 echo.
 
-REM Open the browser a few seconds later, once the server is up.
-start "" cmd /c "timeout /t 3 /nobreak >nul & start "" http://127.0.0.1:8000"
-
-".venv\Scripts\python.exe" scripts\internal\serve.py
+REM serve.py picks a free port if 8000 is taken and opens the browser on the real address
+REM once the server is answering, so the two can never disagree about the port.
+".venv\Scripts\python.exe" scripts\internal\serve.py --open
 
 echo.
 echo Portal stopped.
