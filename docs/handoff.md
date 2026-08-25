@@ -21,11 +21,24 @@ About 94 accounts and 26 distinct merchant names collected so far, over 132 fetc
 ## How to run things
 
 ```
-.venv\Scripts\python.exe -m pytest -q         # 267 tests, all offline, ~15s
-.venv\Scripts\python.exe -m ruff check src tests docs
+.venv\Scripts\python.exe -m pytest -q         # 308 tests, all offline, ~15s
+.venv\Scripts\python.exe -m ruff check src tests scripts docs
 scripts\Start.bat                             # portal on http://127.0.0.1:8000
+scripts\Check.bat                             # why won't the portal start? read-only
 .venv\Scripts\python.exe docs\build_pdf.py    # regenerate the architecture PDF
 ```
+
+`Start.bat` now kills a portal left over from a previous launch before starting, and the
+portal moves to the next free port when 8000 cannot be bound — so a stale process no
+longer blocks a start, and the window prints the address it actually got.
+
+**When the portal will not start, run `scripts\Check.bat` before anything else.** Three
+unrelated faults all surface as the same `WinError 10048` — an old portal still holding the
+port, a port Windows has bind-reserved for Hyper-V/WSL/Docker with nothing to kill, and a
+working copy older than the fix — and it names which one it is. The third is invisible from
+the error message and cost the most time: the launcher kept printing its old banner while
+the fix sat unmerged, so every retry reproduced the same failure. If a fix "doesn't work",
+check that the code on disk is the fixed code before debugging anything else.
 
 Always use `.venv\Scripts\python.exe`, never the system Python.
 
@@ -136,10 +149,22 @@ recurring UI elements and the reasoning (not linked in the nav).
   published that number**. Which screenshot that is has to be established, not assumed: see
   `_screenshot_for` in `api/routes`. Where no stored page can be shown to carry the number,
   no picture is shown — another method's screenshot is evidence of the wrong thing.
-- **Fetches** — manual card and schedule card side by side, then paged fetch history. The
-  outcome card shows once and stands down on reload. A row opens `/runs/<id>`: when it went,
-  how long it took, and what it brought back, with the payees **never seen before marked on
-  their own rows**. Evidence is still captured and hashed but is not surfaced here.
+- **Fetches** — two lanes, always both on the page: fetching by hand on the left, the
+  schedule on the right. Then the paged fetch history. **A fetch reports in the lane that
+  started it** — `RunInfo.source` is `"manual"` or `"schedule"`, and the scheduler passes
+  `source="schedule"`. So a fetch nobody started is recognisable by *where* it is, which is
+  the question the schedule firing unattended always raises. A scheduled run never moves
+  into the manual column; the manual card stays put with its button disabled rather than
+  leaving a blank column, and after a manual fetch ends its outcome and the button sit
+  together. The cards are headings only — "Fetch now" and "Fetch on a schedule" — the
+  explanatory paragraphs were cut. The outcome card shows once and stands down on reload.
+  A row opens `/runs/<id>`: when it went, how long it took, and what it brought back, with
+  the payees **never seen before marked on their own rows**. Evidence is still captured and
+  hashed but is not surfaced here.
+- **Both site dropdowns** (manual and schedule) offer **All sites (N)** first. "All" is
+  decided *after* unparseable configs are folded back in, so a config newer than the running
+  portal's code cannot make the choice vanish — that config still parses fine in the fresh
+  subprocess a fetch spawns.
 
 Dates are Bangladesh format and +06:00 everywhere (`_stamp` / `_day` in `api/routes`).
 
