@@ -11,7 +11,6 @@ non-technical reviewer can actually read.
 from __future__ import annotations
 
 import json
-import os
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -215,10 +214,14 @@ class BrowserFetcher:
         """A flow value, with ``${NAME}`` read from the environment.
 
         Keeps a payer's phone number out of git: the config names the variable, .env holds
-        the number. A plain string is returned unchanged; an unset variable becomes empty,
-        which the caller reports rather than typing nothing into the form."""
+        the number. Read through the credentials helper, which sees ``.env`` behind the
+        process environment - the launcher writes the file but never exports it. A plain
+        string is returned unchanged; an unset variable becomes empty, which the caller
+        reports rather than typing nothing into the form."""
         if value and value.startswith("${") and value.endswith("}"):
-            return os.environ.get(value[2:-1], "")
+            from ght.credentials import env_value
+
+            return env_value(value[2:-1])
         return value or ""
 
     def _click_into_new_tab(self, target, selector: str):

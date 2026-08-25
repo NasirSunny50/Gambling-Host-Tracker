@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import re
 from dataclasses import dataclass, field
 
@@ -153,10 +152,12 @@ def probes_of(config: SourceConfig) -> list[Probe]:
     skipping it also means no order is raised, so it stays off until the operator opts in by
     setting the number.
     """
+    from ght.credentials import env_value
+
     probes = config.probes or [
         Probe(name=config.slug, flow=config.flow, wait_for=config.wait_for, blocks=config.blocks)
     ]
-    return [p for p in probes if not p.requires_env or os.environ.get(p.requires_env)]
+    return [p for p in probes if not p.requires_env or env_value(p.requires_env)]
 
 
 def config_for_probe(config: SourceConfig, probe: Probe) -> SourceConfig:

@@ -66,6 +66,16 @@ def _environment() -> dict[str, str]:
     return values
 
 
+def env_value(name: str) -> str:
+    """One variable, read the way credentials are — ``.env`` behind the process environment.
+
+    Anything that needs an operator-set value out of git (a payer's phone number a flow
+    types) must read it through here, not ``os.environ``: the launcher writes ``.env`` but
+    never exports it, so the process environment alone would not see the file the operator
+    edited."""
+    return (_environment().get(name) or "").strip()
+
+
 def for_site(slug: str, env: dict[str, str] | None = None) -> Credentials:
     """Credentials for one site, or an empty pair when none are configured."""
     source = _environment() if env is None else env
