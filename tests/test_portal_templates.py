@@ -778,3 +778,87 @@ def test_a_config_this_process_cannot_parse_still_lists_its_site(monkeypatch):
     slugs = {site["slug"] for site in routes._runnable_sites()}
     assert "1xbet-bd" in slugs
     assert "melbet-bd" in slugs
+
+
+# ----------------------------------------------------------------- sites tracked
+
+
+def test_sites_tracked_does_not_count_the_all_sites_choice(monkeypatch, tmp_path):
+    """"All sites" leads the fetch dropdown, but it is a way of pointing a fetch, not a
+    site. Counting the dropdown it sits in reported three sites tracked for the two that
+    exist, so the figure counts the configs alone."""
+    from pathlib import Path
+
+    from ght.api.routes import _runnable_sites, _tracked_sites
+    from ght.config import settings
+
+    source = Path("tests/fixtures/demo-site.yaml").read_text(encoding="utf-8")
+    (tmp_path / "one.yaml").write_text(source, encoding="utf-8")
+    (tmp_path / "two.yaml").write_text(source.replace("demo-site", "demo-site-2"), encoding="utf-8")
+    monkeypatch.setattr(settings, "sources_dir", tmp_path)
+
+    assert len(_tracked_sites()) == 2
+    assert "all" not in {s["slug"] for s in _tracked_sites()}
+    # The dropdown still leads with the choice; only the figure's count changed.
+    assert _runnable_sites()[0]["slug"] == "all"
+
+
+def test_the_sites_page_names_the_targets_and_what_each_brought_back():
+    """The figure raises a question it cannot answer - which sites? - so it links to a page
+    that names them, with each one's fetches and payees beside it."""
+    html = render(
+        "sites.html",
+        rows=[
+            {"slug": "1xbet-bd", "name": "1xBet Bangladesh", "status": "active",
+             "fetcher": "browser", "probes": 5, "discoveries": 2, "broken": False,
+             "fetches": 40, "accounts": 12, "names": 3, "payees": 15, "last": run_row(id=88)},
+            {"slug": "melbet-bd", "name": "Melbet Bangladesh", "status": "paused",
+             "fetcher": "browser", "probes": 14, "discoveries": 0, "broken": False,
+             "fetches": 0, "accounts": 0, "names": 0, "payees": 0, "last": None},
+        ],
+    )
+    assert "1xBet Bangladesh" in html and "melbet-bd" in html
+    assert ">15<" in html                       # payees found on the first site
+    assert 'href="/runs/88"' in html            # straight to its last fetch
+    assert "never" in html                      # a configured site nobody has fetched yet
+    assert "paused" in html
+
+
+def test_a_recent_fetch_on_the_overview_opens_the_same_page_the_history_does():
+    """A row in Recent fetches asks the same question as a row in the fetch history, so it
+    carries the same link rather than sending the reader to /runs to find it again."""
+    html = render(
+        "dashboard.html",
+        totals={"accounts": 25, "active": 12, "review": 3, "sites": 2, "runs": 42},
+        by_channel=[("bkash", 8)],
+        first_run_at=NOW,
+        runs=[run_row(id=131)],
+        newest=[payee_row()],
+        sites=SITES,
+    )
+    assert 'data-href="/runs/131"' in html
+    assert 'href="/runs/131"' in html
+    assert 'href="/sites"' in html              # and the figure names its own list
+
+
+def test_a_payee_says_which_site_published_it():
+    """The first thing asked of a number on a blocklist. It was only in a panel further
+    down the page, which reads as a detail rather than as part of the identity."""
+    site = SimpleNamespace(id=1, slug="1xbet-bd", name="1xBet Bangladesh")
+    link = SimpleNamespace(first_seen_at=NOW, last_seen_at=NOW, observation_count=4)
+    html = render(
+        "account_detail.html",
+        account=account(), observations=[], sites=[(site, link)], screenshot=None,
+    )
+    assert "Found on" in html
+    assert "1xbet-bd" in html
+
+    named = render(
+        "merchant_detail.html",
+        merchant=SimpleNamespace(id=9, merchant_name="ALADDIN EXPRESS", channel="nagad",
+                                 probe="fast-nagad", run_id=44, site_id=1, seen_at=NOW),
+        sightings=[SimpleNamespace(seen_at=NOW, run_id=44)],
+        site=site, screenshot=None,
+    )
+    assert "Found on" in named
+    assert "1xbet-bd" in named

@@ -23,7 +23,11 @@
       </div>
       <dl class="kv">
         <div class="row"><dt>Account number</dt><dd>{{ ui.na() }}</dd></div>
-        <div class="row"><dt>Site</dt><dd>{{ site.slug if site else ui.unknown() }}</dd></div>
+        {# The same "where did this come from" field a numbered payee carries, worded the
+           same way, so the two detail pages answer the question in the same place. #}
+        <div class="row"><dt>Found on</dt>
+          <dd>{% if site %}<a href="/sites" title="{{ site.name }}">{{ site.slug }}</a>
+              {%- else %}{{ ui.unknown() }}{% endif %}</dd></div>
         <div class="row"><dt>Method</dt><dd class="mono">{{ merchant.probe }}</dd></div>
         <div class="row"><dt>First seen</dt><dd class="mono">{{ sightings[-1].seen_at | stamp }}</dd></div>
         <div class="row"><dt>Last seen</dt><dd class="mono">{{ merchant.seen_at | stamp }}</dd></div>

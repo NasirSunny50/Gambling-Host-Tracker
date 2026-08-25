@@ -24,6 +24,16 @@
         <div class="ident-state">{{ ui.account_state(account) }}</div>
       </div>
       <dl class="kv">
+        {# Where this number came from. It sits in the identity block rather than only in
+           the panel below, because "which site publishes this?" is the first thing asked
+           of a number on a blocklist, and an answer that is further down the page reads
+           as a detail instead of as part of the identity. More than one site here is the
+           strongest finding this data produces: one payment operator collecting for
+           several brands. #}
+        <div class="row"><dt>Found on</dt>
+          <dd>{% if sites %}{% for site, link in sites %}{% if not loop.first %}, {% endif -%}
+              <a href="/sites" title="{{ site.name }}">{{ site.slug }}</a>
+              {%- endfor %}{% else %}{{ ui.unknown() }}{% endif %}</dd></div>
         {# The name is retyped into a case file as often as the number is - and it is the
            half more likely to be got wrong by hand. #}
         <div class="row"><dt>Holder name</dt>

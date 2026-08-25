@@ -346,6 +346,19 @@
           </svg>
         </span><span class="label">Payees</span>
       </a>
+      {# Sites earns a place of its own now that "sites tracked" is a question with an
+         answer: the figure on the Overview links here, and a page you can only reach by
+         clicking a number is a page nobody finds twice. #}
+      <a href="/sites" class="{{ 'on' if page == 'sites' }}">
+        <span class="glyph" aria-hidden="true">
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"
+               stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="10" cy="10" r="7.4"/>
+            <path d="M2.6 10h14.8"/>
+            <path d="M10 2.6a11.4 11.4 0 0 1 0 14.8a11.4 11.4 0 0 1 0-14.8z"/>
+          </svg>
+        </span><span class="label">Sites</span>
+      </a>
       <a href="/runs" class="{{ 'on' if page == 'runs' }}">
         <span class="glyph" aria-hidden="true">
           <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"

@@ -236,7 +236,11 @@ def dashboard(request: Request, session: Session = Depends(get_session)):
         # historical record - a site collected once keeps its rows so its runs and evidence
         # still mean something - so counting it answers a different question than the one
         # the figure asks. The configs on disk are the targets.
-        "sites": len(_runnable_sites()),
+        #
+        # Counted from the configs alone, never from the dropdown: the dropdown leads with
+        # "All sites", which is a choice of target and not a site, and counting the list it
+        # sits in reported three tracked sites for the two that exist.
+        "sites": len(_tracked_sites()),
         # How much work has gone in. An account count on its own says nothing about
         # whether the collector has been looking - thirty accounts from two runs and from
         # two hundred are very different pictures of a site.
@@ -274,6 +278,55 @@ def dashboard(request: Request, session: Session = Depends(get_session)):
             "newest": newest,
             "sites": sites,
         },
+    )
+
+
+@router.get("/sites", response_class=HTMLResponse)
+def sites_page(request: Request, session: Session = Depends(get_session)):
+    """What "sites tracked" on the Overview actually means, named one by one.
+
+    The figure alone raises the question it cannot answer - *which* sites? - so it links
+    here. The list is the configs on disk, because those are the targets; the database only
+    supplies what each one has produced so far, and a config that has never been fetched
+    still belongs on the page with nothing beside it.
+    """
+    tracked = _tracked_sites()
+    rows_by_slug = {s.slug: s for s in session.scalars(select(Site))}
+
+    rows = []
+    for site in tracked:
+        row = rows_by_slug.get(site["slug"])
+        stats = {"fetches": 0, "accounts": 0, "names": 0, "last": None}
+        if row is not None:
+            stats["fetches"] = session.scalar(
+                select(func.count()).select_from(CollectionRun).where(CollectionRun.site_id == row.id)
+            ) or 0
+            stats["accounts"] = session.scalar(
+                select(func.count()).select_from(AccountSite).where(AccountSite.site_id == row.id)
+            ) or 0
+            # Name-only payees are payees too, and a site's total that left them out
+            # disagreed with the Payees list filtered to the same site.
+            stats["names"] = session.scalar(
+                select(func.count()).select_from(
+                    select(MerchantSighting.merchant_name, MerchantSighting.channel)
+                    .where(MerchantSighting.site_id == row.id)
+                    .group_by(MerchantSighting.merchant_name, MerchantSighting.channel)
+                    .subquery()
+                )
+            ) or 0
+            stats["last"] = session.scalar(
+                select(CollectionRun)
+                .where(CollectionRun.site_id == row.id)
+                .order_by(CollectionRun.started_at.desc())
+                .limit(1)
+            )
+        rows.append({**site, **stats, "payees": stats["accounts"] + stats["names"]})
+
+    _log(session, request, "api_read", {"sites": len(rows)}, len(rows))
+    return templates.TemplateResponse(
+        request,
+        "sites.html",
+        {"nav": _nav(session), "rows": rows},
     )
 
 
@@ -697,12 +750,13 @@ def account_detail(account_id: int, request: Request, session: Session = Depends
     )
 
 
-def _runnable_sites() -> list[dict]:
-    """The sites a fetch can be pointed at, with "every one of them" offered first.
+def _tracked_sites() -> list[dict]:
+    """The sites this install is configured to collect - one per config file, nothing else.
 
-    "All" is a choice of target rather than a second kind of fetch, so it belongs in the
-    same dropdown. It runs the active sites one after another - never at once, because a
-    fetch drives a real browser and two of them race on the login session.
+    Kept apart from ``_runnable_sites`` because the two answer different questions. This
+    one is "what are we tracking", which is what the Overview figure counts and the Sites
+    page lists; the other adds the "All sites" choice, which is a way of pointing a fetch
+    rather than a site of its own.
     """
     configs, broken = scan_sources()
     sites = [
@@ -711,6 +765,12 @@ def _runnable_sites() -> list[dict]:
             "name": config.name,
             "status": config.status,
             "fetcher": config.fetcher,
+            # How many methods the config walks: the named probes plus the families found
+            # at run time. A discovery stands for however many cells the site is showing
+            # today, so this is a floor, not an exact count.
+            "probes": len(config.probes),
+            "discoveries": len(config.discover),
+            "broken": False,
         }
         for config in configs
     ]
@@ -723,7 +783,21 @@ def _runnable_sites() -> list[dict]:
     for bad in broken:
         slug = bad.path.stem
         if slug not in known:
-            sites.append({"slug": slug, "name": slug, "status": "active", "fetcher": ""})
+            sites.append({
+                "slug": slug, "name": slug, "status": "active", "fetcher": "",
+                "probes": 0, "discoveries": 0, "broken": True,
+            })
+    return sites
+
+
+def _runnable_sites() -> list[dict]:
+    """The sites a fetch can be pointed at, with "every one of them" offered first.
+
+    "All" is a choice of target rather than a second kind of fetch, so it belongs in the
+    same dropdown. It runs the active sites one after another - never at once, because a
+    fetch drives a real browser and two of them race on the login session.
+    """
+    sites = _tracked_sites()
     # "All" is decided *after* the broken files are folded back in, and counted the same way
     # a fetch would run them. A file that fails to parse in this long-lived process still
     # parses fine in the fresh subprocess a fetch spawns, so "all" would fetch it - and the

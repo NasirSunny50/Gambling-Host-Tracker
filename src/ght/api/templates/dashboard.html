@@ -20,7 +20,7 @@
   {{ ui.figure(totals.accounts, "Accounts found", "numbered and name-only, all time", href="/payees") }}
   {{ ui.figure(totals.runs, "Fetches run",
                ("since " ~ (first_run_at | day)) if first_run_at else "none yet", href="/runs") }}
-  {{ ui.figure(totals.sites, "Sites tracked", "configured targets", href="/runs") }}
+  {{ ui.figure(totals.sites, "Sites tracked", "configured targets", href="/sites") }}
 </div>
 
 <div class="split">
@@ -72,9 +72,12 @@
 
 <section class="panel" style="margin-top:14px">
   <h2>Recent fetches</h2>
-  {% call ui.table(["Started", "Site", "Outcome", "#Found", "#New", "Note"]) %}
+  {# Every row here is also a row in the fetch history, and there it opens the fetch. A
+     reader who lands on one from the Overview is asking the same question, so the row
+     carries the same link rather than sending them to /runs to find it again. #}
+  {% call ui.table(["Started", "Site", "Outcome", "#Found", "#New", "Note", ""]) %}
     {% for r in runs %}
-    <tr>
+    <tr class="linked" data-href="/runs/{{ r.id }}">
       <td class="dim mono nowrap">{{ r.started_at | stamp }}</td>
       <td class="dim nowrap">{{ sites[r.site_id].slug if r.site_id in sites else r.site_id }}</td>
       <td>{{ ui.outcome_pill(r.status) }}</td>
@@ -85,9 +88,10 @@
         {%- if r.error %}<span title="{{ r.error }}">{{ r.error[:90] }}{{ "…" if r.error | length > 90 }}</span>
         {%- else %}&mdash;{% endif -%}
       </td>
+      <td class="nowrap"><a href="/runs/{{ r.id }}">Details &rsaquo;</a></td>
     </tr>
     {% else %}
-    <tr><td colspan="6"><div class="quiet-empty">No fetches recorded yet.</div></td></tr>
+    <tr><td colspan="7"><div class="quiet-empty">No fetches recorded yet.</div></td></tr>
     {% endfor %}
   {% endcall %}
 </section>
