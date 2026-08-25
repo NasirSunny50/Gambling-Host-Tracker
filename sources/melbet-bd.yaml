@@ -345,6 +345,12 @@ notes: |
   panel at all - and the fetch still reported "ok", because a walk cut short said nothing.
   Both silences are now failures the fetch is blamed for.
 
-  `rocket-free` failed to read in run 255 after working in 254. Site-side flap or a drifted
-  selector - watch it over the next few fetches before touching the config.
+  `rocket-free` failed to read in run 255 and has never failed before or since - checked
+  against every Melbet fetch in the database, it returned its twelve-digit number on all of
+  them, including run 254 twelve minutes earlier. The stored page settles it: run 254's
+  capture holds `.modal-message-address` = 016200871510 inside an open modal; run 255's
+  capture has no `.modal-payment.active` at all. The modal never opened that once, so this
+  is not a drifted selector and there is nothing to change here. If it starts recurring,
+  look at the reset between probes (the probe before it is trust-axiata-pay, which
+  succeeded), not at the selector.
 
