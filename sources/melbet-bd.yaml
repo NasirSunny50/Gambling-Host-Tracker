@@ -253,6 +253,13 @@ discover:
     # The panel's frame appears seconds before its cells do; wait for any cell first.
     ready: ".payment-cell"
     match: [bkash, nagad, upay]
+    # Nagad by Paykassma is left alone. Its cell matches "nagad", but it reaches its payee
+    # by taking the whole tab to the provider's checkout - so it shows no number here, and
+    # the panel it navigates away from has to be rebuilt before the next cell can be
+    # clicked. Live 2026-08-25 that reload did not come back, and the walk stopped there
+    # with uPay, Nagad Free and Bkash Free never opened. Its name is collected by the
+    # explicit `nagad-paykassma` probe, which is the only thing that pays for it.
+    skip_keys: [nagad_melbet_p2c]
     wait_for: ".modal-payment.active"
     container: ".modal-payment.active"
     value: ".modal-payment.active .payment_modal_input--html, .modal-payment.active .modal-message-address"
@@ -326,3 +333,18 @@ notes: |
   E-wallets cells as at 2026-08-25: Cellfin Free, Nagad, Rocket, Nagad by Paykassma, uPay,
   Nagad Free, Trust Axiata Pay, Rocket Free, Bkash Free, iPay, then the non-BD wallets
   (WebMoney, MiFinity, Skrill, MoneyGO, BinancePay, BybitPay, KuCoin, Bitget).
+
+  Verified live 2026-08-25 (run 255, walked without the paykassma probe so it cost no
+  deposit request). All seven banks came back with distinct accounts - City Bank, DBBL,
+  EBL, Islami, Premier, Pubali, UCB - and `e-wallet-bkash-free` returned this brand's first
+  bKash account. The e-wallet walk also covered Nagad, Nagad Free and uPay.
+
+  The run before it (254) is why `skip_keys` exists: the discovery opened Nagad by
+  Paykassma, which took the tab to the provider's checkout, and the panel never came back.
+  uPay, Nagad Free and Bkash Free were never opened and the bank discovery never got a
+  panel at all - and the fetch still reported "ok", because a walk cut short said nothing.
+  Both silences are now failures the fetch is blamed for.
+
+  `rocket-free` failed to read in run 255 after working in 254. Site-side flap or a drifted
+  selector - watch it over the next few fetches before touching the config.
+

@@ -1653,3 +1653,33 @@ def test_a_probe_is_skipped_until_its_required_env_is_set(monkeypatch):
     assert [p.name for p in probes_of(config)] == ["always"]
     monkeypatch.setenv("GHT_TEST_OPTIN", "01700000000")
     assert [p.name for p in probes_of(config)] == ["always", "opt-in"]
+
+
+def test_a_cell_that_leaves_the_page_can_be_left_out_of_a_walk():
+    """A cell whose payee lives on the provider's own checkout shows no number here and
+    navigates the tab away, so the panel has to be rebuilt before the next cell. Live, that
+    reload did not come back and the three cells after it were never opened."""
+    from ght.sources import Discovery
+
+    disc = Discovery(
+        name="e-wallet", kind="cells", items=".payment-cell", label=".name", value=".v",
+        match=["bkash", "nagad"], skip_keys=["nagad_melbet_p2c"],
+    )
+    cells = [
+        ("Nagad", "tarak_nagad"),
+        ("Nagad by Paykassma", "nagad_melbet_p2c"),
+        ("Bkash Free", "bkash_merchant_melbet"),
+    ]
+    kept = [key for label, key in cells
+            if any(w in label.lower() for w in disc.match) and key not in disc.skip_keys]
+    assert kept == ["tarak_nagad", "bkash_merchant_melbet"]
+
+
+def test_a_discovery_with_no_skip_list_walks_everything_it_matches():
+    """The default has to stay "walk what you find" - skipping is the exception, written
+    down per cell, not something a config falls into by leaving a field out."""
+    from ght.sources import Discovery
+
+    disc = Discovery(name="e-wallet", kind="cells", items=".payment-cell", value=".v",
+                     label=".name", match=["bkash"])
+    assert disc.skip_keys == []

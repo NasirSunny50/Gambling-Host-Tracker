@@ -232,6 +232,12 @@ class Discovery(_Strict):
     # ``cells`` only: a cell qualifies when its name contains one of these (case-insensitive).
     # Each entry doubles as the channel the match is attributed to, so they must be channels.
     match: list[str] = Field(default_factory=list)
+    # ``cells`` only: method ids to leave alone even when their name matches. For the cells
+    # that reach their payee by leaving the page - a provider's own checkout - which show
+    # no number here and, worse, navigate the tab away, so the panel has to be rebuilt
+    # before the next cell and the rest of the walk is at the mercy of that reload. Their
+    # names come from an explicit probe or not at all, so skipping them costs nothing.
+    skip_keys: list[str] = Field(default_factory=list)
     # A fixed channel for every match. Required for ``options`` (which has no name to read);
     # for ``cells`` it overrides the matched-word inference.
     channel: str | None = None

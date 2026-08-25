@@ -691,6 +691,17 @@ class BrowserFetcher:
             if not self._reset_panel(self._open_frame(page)):
                 self._load_any(page, urls)
             if self._panel_frame(page) is None:
+                # Not skipped quietly. A discovery that never got a panel to walk collected
+                # nothing, and "nothing" is indistinguishable from "this site has no banks"
+                # unless the run says which it was - that silence is what let a whole bank
+                # list go missing while the fetch reported itself healthy.
+                out.append(self._as_discovered(
+                    disc,
+                    f"{disc.name}: (panel did not open)",
+                    None,
+                    self._failed(page.url, "the panel never came back, so nothing was walked",
+                                 flow_error="panel lost"),
+                ))
                 continue
             if disc.kind == "cells":
                 out.extend(self._discover_cells(page, urls, disc))
@@ -753,7 +764,7 @@ class BrowserFetcher:
             except Exception:  # noqa: BLE001, S112 - skip a cell we cannot read
                 continue
             channel = self._infer_channel(label, disc)
-            if channel and key:
+            if channel and key and key not in disc.skip_keys:
                 targets.append((label, key, channel))
 
         out = []
@@ -771,6 +782,24 @@ class BrowserFetcher:
                     self._load_any(page, urls)
                 frame = self._panel_frame(page)
                 if frame is None or not self._panel_ready(frame, disc):
+                    # The panel did not come back, so the cells after this one cannot be
+                    # walked. Say so rather than returning what was collected as though it
+                    # were the section: a walk cut short used to end the fetch "ok" with
+                    # half the e-wallets missing and nothing anywhere saying they were
+                    # never looked at. This is our breakage, not the site switching a
+                    # method off, so it belongs in the fetch's blame.
+                    missed = ", ".join(name for name, _, _ in targets[position + 1:])
+                    out.append(self._as_discovered(
+                        disc,
+                        f"{disc.name}: (panel did not come back)",
+                        None,
+                        self._failed(
+                            page.url,
+                            f"the panel did not reload, so {len(targets) - position - 1} "
+                            f"cells were never opened ({missed})",
+                            flow_error="panel lost",
+                        ),
+                    ))
                     break
         return out
 
