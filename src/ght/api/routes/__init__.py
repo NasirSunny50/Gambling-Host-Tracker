@@ -451,25 +451,6 @@ def _run_ids(run) -> list[int]:
     return list(run) if isinstance(run, (list, tuple, set)) else [run]
 
 
-def _account_query(channel: str | None, q: str | None, run: int | None = None,
-                   site: str | None = None):
-    stmt = select(Account)
-    if run:
-        stmt = stmt.where(Account.id.in_(_accounts_from_run(run)))
-    if site:
-        stmt = stmt.where(Account.id.in_(_on_site(site)))
-    if channel:
-        stmt = stmt.where(Account.channel == channel)
-    if q:
-        like = f"%{q.strip()}%"
-        stmt = stmt.where(
-            Account.account_number.like(like)
-            | Account.holder_name.like(like)
-            | Account.bank_name.like(like)
-        )
-    return stmt
-
-
 def _on_site(slug: str):
     """Accounts linked to one site, as a subquery to test membership against."""
     return (
@@ -1277,32 +1258,6 @@ def stop_schedule(request: Request, session: Session = Depends(get_session)):
     return RedirectResponse("/runs", status_code=303)
 
 
-def _merchant_rows(channel: str | None, q: str | None, run: int | None,
-                   site: str | None = None):
-    """Name-only payees, grouped the way the Payees table groups them."""
-    stmt = (
-        select(
-            MerchantSighting.merchant_name,
-            MerchantSighting.channel,
-            func.count().label("times"),
-            func.min(MerchantSighting.seen_at),
-            func.max(MerchantSighting.seen_at),
-        )
-        .join(Site, Site.id == MerchantSighting.site_id)
-        .group_by(MerchantSighting.merchant_name, MerchantSighting.channel)
-        .order_by(MerchantSighting.channel)
-    )
-    if run:
-        stmt = stmt.where(MerchantSighting.run_id.in_(_run_ids(run)))
-    if site:
-        stmt = stmt.where(Site.slug == site)
-    if channel:
-        stmt = stmt.where(MerchantSighting.channel == channel)
-    if q:
-        stmt = stmt.where(MerchantSighting.merchant_name.like(f"%{q.strip()}%"))
-    return stmt
-
-
 @router.get("/payees.pdf")
 def payees_pdf(
     request: Request,
@@ -1373,86 +1328,39 @@ def accounts_csv(
 ):
     """The same rows the table is showing, as a file the AML team can hand on.
 
+    The same columns as the PDF, in the same order, from the same query. The two are one
+    report in two formats - one for a person to file, one for a spreadsheet - and they were
+    built from different queries with different columns, so the same filters could hand you
+    two files that disagreed about what was in the set. The columns live in
+    ``export.report.COLUMNS`` and both exports read them, so they cannot drift apart again.
+
     Both kinds of payee, because both are what the table shows. A name-only one has no
     number to blocklist, but leaving it out of the export would mean the file quietly
-    disagreed with the screen it was downloaded from — and the names are the whole of what
+    disagreed with the screen it was downloaded from - and the names are the whole of what
     is collectable from the methods that publish no wallet.
     """
-    rows = session.scalars(
-        _account_query(channel, q, run, site).order_by(Account.channel)
-    ).all()
-    merchants = session.execute(_merchant_rows(channel, q, run, site)).all()
+    from ght.export.report import COLUMNS, report_row
+
+    rows = [dict(r._mapping) for r in session.execute(_payee_query(channel, q, run, site))]
     _log(
         session,
         request,
         "export",
-        {"channel": channel, "q": q, "run": run, "site": site},
-        len(rows) + len(merchants),
+        {"format": "csv", "channel": channel, "q": q, "run": run, "site": site},
+        len(rows),
     )
 
     buffer = io.StringIO()
     writer = csv.writer(buffer)
-    writer.writerow(
-        [
-            "kind",
-            "channel",
-            "account_number",
-            "holder_name",
-            "bank_name",
-            "branch",
-            "operator",
-            "account_type",
-            "confidence",
-            "is_active",
-            "observations",
-            "first_seen_at",
-            "last_seen_at",
-        ]
-    )
-    for account in rows:
-        writer.writerow(
-            [
-                "account",
-                account.channel,
-                account.account_number,
-                account.holder_name or "",
-                account.bank_name or "",
-                account.branch or "",
-                account.operator or "",
-                account.account_type or "",
-                f"{account.confidence:.2f}",
-                "yes" if account.is_active else "no",
-                account.observation_count,
-                account.first_seen_at.isoformat() if account.first_seen_at else "",
-                account.last_seen_at.isoformat() if account.last_seen_at else "",
-            ]
-        )
-    for name, merchant_channel, times, first_seen, last_seen in merchants:
-        writer.writerow(
-            [
-                "name_only",
-                merchant_channel,
-                "",  # there is no number; the method never publishes one
-                name,
-                "",
-                "",
-                "",
-                "",
-                "",
-                # A name is never marked gone: it rotates per deposit request, so its
-                # absence today says nothing about whether it is still in use.
-                "",
-                times,
-                first_seen.isoformat() if first_seen else "",
-                last_seen.isoformat() if last_seen else "",
-            ]
-        )
+    writer.writerow([col.label for col in COLUMNS])
+    for row in rows:
+        shaped = report_row(row, CHANNEL_LABELS)
+        writer.writerow([shaped[col.key] for col in COLUMNS])
 
     buffer.seek(0)
-    stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M")
+    stamp = datetime.now(DHAKA).strftime("%Y%m%d-%H%M")
     return StreamingResponse(
         iter([buffer.getvalue()]),
         media_type="text/csv",
-        headers={"Content-Disposition": f'attachment; filename="accounts-{stamp}.csv"'},
+        headers={"Content-Disposition": f'attachment; filename="payees-{stamp}.csv"'},
     )
-

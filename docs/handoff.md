@@ -225,6 +225,15 @@ Dates are Bangladesh format and +06:00 everywhere (`_stamp` / `_day` in `api/rou
 date in the browser's own zone ten seconds after load. It reads Dhaka off UTC, so a machine
 set to another zone still shows the same hour the tables below it show.
 
+**The CSV and the PDF are one report in two formats** — same columns, same order, same
+query, same filters. They used to be built from different queries with different columns,
+so the same filters could hand you two files that disagreed about what was in the set. The
+columns are defined once in `export.report.COLUMNS` and filled once in `report_row`, and
+both exports read them: Channel, Account number, Name, Bank, Site, Seen, Last seen. The
+only deliberate difference is the empty cell — the page prints an em-dash so the reader can
+see it was considered, the spreadsheet leaves it genuinely empty so it sorts and filters as
+empty. (`_account_query` and `_merchant_rows` fed the old CSV and are gone.)
+
 **The PDF report** (`export/report.py`) is set for a page that gets printed and photocopied:
 9.5pt body, 22pt rows, and a 12pt `GUTTER` that every column's width includes, so widening
 a column widens the gap with it. Bank and Last seen are sized to hold their longest real

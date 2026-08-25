@@ -111,9 +111,33 @@ COLUMNS = (
 )
 
 
-def _stamp(value) -> str:
+def report_row(row: dict, channel_labels: dict, blank: str = "") -> dict:
+    """One payee shaped into the report's columns, keyed by ``Column.key``.
+
+    Both exports read this. The CSV and the PDF are the same report in two formats - one
+    for a person, one for a spreadsheet - and they used to be built from different queries
+    with different columns, so the same filters could produce two files that disagreed
+    about what was in the set. Now the columns are defined once, above, and filled once,
+    here.
+
+    ``blank`` is the only difference between the two: a printed table wants an em-dash in
+    an empty cell so the reader can see the cell was considered, a spreadsheet wants the
+    cell genuinely empty so it sorts and filters as empty.
+    """
+    return {
+        "channel": channel_labels.get(row.get("channel"), row.get("channel")),
+        "number": row.get("number") or blank,
+        "name": row.get("name") or blank,
+        "bank": row.get("bank") or blank,
+        "site": row.get("site") or blank,
+        "times": row.get("times"),
+        "last_seen": _stamp(row.get("last_seen"), blank),
+    }
+
+
+def _stamp(value, blank: str = "—") -> str:
     if value is None:
-        return "—"
+        return blank
     if getattr(value, "tzinfo", None) is None:
         value = value.replace(tzinfo=UTC)
     return value.astimezone(DHAKA).strftime("%d/%m/%Y %I:%M %p")
@@ -305,18 +329,7 @@ def build_pdf(rows: list[dict], *, scope: str, actor: str, channel_labels: dict)
     report = _Report(c, page_size, meta, body_font=_register_body_font())
     report.new_page()
     for index, row in enumerate(rows):
-        report.row(
-            {
-                "channel": channel_labels.get(row.get("channel"), row.get("channel")),
-                "number": row.get("number") or "—",
-                "name": row.get("name") or "—",
-                "bank": row.get("bank") or "—",
-                "site": row.get("site") or "—",
-                "times": row.get("times"),
-                "last_seen": _stamp(row.get("last_seen")),
-            },
-            shaded=index % 2 == 1,
-        )
+        report.row(report_row(row, channel_labels, blank="—"), shaded=index % 2 == 1)
     report.total(len(rows))
     report.footer()
     c.showPage()

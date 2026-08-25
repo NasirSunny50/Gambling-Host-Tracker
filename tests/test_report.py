@@ -90,3 +90,47 @@ def test_a_name_the_font_cannot_draw_is_not_faked():
     # With a Unicode face registered the name goes through untouched.
     assert _latin_safe("মেসার্স", "Nirmala") == "মেসার্স"
     assert _latin_safe("Plain Name", "Helvetica") == "Plain Name"
+
+
+def test_the_spreadsheet_and_the_document_carry_the_same_columns():
+    """They are one report in two formats. Built from different queries with different
+    columns, the same filters could hand you two files that disagreed about what was in
+    the set - so both read one definition of the columns and one row shaper."""
+    import csv
+    import io
+
+    from ght.export.report import COLUMNS, report_row
+
+    payee = {"channel": "bkash", "number": "+8801700000000", "name": "A Holder",
+             "bank": None, "site": "1xbet-bd", "times": 3, "last_seen": NOW}
+
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow([col.label for col in COLUMNS])
+    shaped = report_row(payee, LABELS)
+    writer.writerow([shaped[col.key] for col in COLUMNS])
+    header, row = list(csv.reader(io.StringIO(buffer.getvalue())))
+
+    _, text = read(build_pdf([payee], scope="All payees, all sites", actor="127.0.0.1",
+                             channel_labels=LABELS))
+    # Same columns, in the same order - the PDF sets its heads in capitals.
+    assert header == ["Channel", "Account number", "Name", "Bank", "Site", "Seen", "Last seen"]
+    for label in header:
+        assert label.upper() in text
+    # And the same values behind them.
+    for value in row:
+        if value:
+            assert value in text
+
+
+def test_a_spreadsheet_cell_is_empty_where_the_page_prints_a_dash():
+    """The one place the two differ, and deliberately: a printed table wants a mark so the
+    reader can see the cell was considered, a spreadsheet wants an empty cell so it sorts
+    and filters as empty."""
+    from ght.export.report import report_row
+
+    payee = {"channel": "nagad", "number": None, "name": "ALADDIN EXPRESS", "bank": None,
+             "site": "1xbet-bd", "times": 1, "last_seen": None}
+    assert report_row(payee, LABELS)["number"] == ""
+    assert report_row(payee, LABELS, blank="—")["number"] == "—"
+    assert report_row(payee, LABELS)["last_seen"] == ""

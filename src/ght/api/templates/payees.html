@@ -64,9 +64,10 @@
   {% if filtered %}
   <a class="btn btn-clear" href="/payees">Clear filters</a>
   {% endif %}
-  <a class="btn" href="/accounts.csv?{{ filters }}" title="Every column, for a spreadsheet">
+  {# Same columns, same rows, same filters - one report in two formats. #}
+  <a class="btn" href="/accounts.csv?{{ filters }}" title="The same report, for a spreadsheet">
     {{ ui.file_icon("csv") }} CSV</a>
-  <a class="btn" href="/payees.pdf?{{ filters }}" title="A report to file or hand on">
+  <a class="btn" href="/payees.pdf?{{ filters }}" title="The same report, to file or hand on">
     {{ ui.file_icon("pdf") }} PDF</a>
 </form>
 
