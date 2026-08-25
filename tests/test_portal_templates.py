@@ -971,3 +971,75 @@ def test_every_table_column_starts_at_the_same_edge():
 
     css = (TEMPLATES_DIR / "base.html").read_text(encoding="utf-8")
     assert "th.num, td.num { text-align:left;" in css
+
+
+# ------------------------------------------- reading while a fetch is writing
+
+
+def test_the_portal_reads_while_a_fetch_holds_the_write_lock(tmp_path):
+    """Two processes share this database by design: the portal is up while a fetch runs in
+    its own subprocess. Under SQLite's default rollback journal the collector's write lock
+    is exclusive over the whole file, so /payees answered 500 "database is locked" while
+    the fetch it was reporting on ran perfectly. WAL is what makes the read survive."""
+    import sqlalchemy as sa
+
+    from ght.db import BUSY_TIMEOUT_MS, _sqlite_pragmas
+
+    url = f"sqlite:///{tmp_path / 'x.db'}"
+    engine = sa.create_engine(url, future=True)
+    sa.event.listen(engine, "connect", _sqlite_pragmas)
+    with engine.begin() as conn:
+        conn.execute(sa.text("CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT)"))
+        conn.execute(sa.text("INSERT INTO t (v) VALUES ('before')"))
+
+    # A writer that holds its transaction open, the way a fetch's write burst does.
+    writer = engine.connect()
+    writer.begin()
+    writer.execute(sa.text("INSERT INTO t (v) VALUES ('during')"))
+    try:
+        with engine.connect() as reader:
+            assert reader.execute(sa.text("SELECT v FROM t")).scalars().all() == ["before"]
+            assert reader.execute(sa.text("PRAGMA journal_mode")).scalar() == "wal"
+            assert reader.execute(sa.text("PRAGMA busy_timeout")).scalar() == BUSY_TIMEOUT_MS
+    finally:
+        writer.rollback()
+        writer.close()
+        engine.dispose()
+
+
+def test_an_audit_row_that_cannot_be_written_does_not_take_the_page_down(caplog):
+    """The audit row is half the reason this data is kept, but it is a note *about* a read
+    and not a reason to refuse the read. It used to 500 the page it was recording."""
+    import logging
+
+    from sqlalchemy.exc import OperationalError
+
+    from ght.api import routes
+
+    class Locked:
+        """A session whose commit fails the way a locked database fails."""
+
+        def __init__(self):
+            self.rolled_back = False
+
+        def add(self, _row):
+            pass
+
+        def execute(self, _statement):
+            pass
+
+        def commit(self):
+            raise OperationalError("INSERT INTO access_log", {}, Exception("database is locked"))
+
+        def rollback(self):
+            self.rolled_back = True
+
+    session = Locked()
+    request = SimpleNamespace(client=SimpleNamespace(host="127.0.0.1"))
+    with caplog.at_level(logging.WARNING):
+        routes._log(session, request, "search", {"q": "x"}, 3)
+
+    # Served, not raised - and the session is usable again for the queries that follow.
+    assert session.rolled_back
+    # Not swallowed either: a lost audit row is a thing someone has to be able to notice.
+    assert "access log not written" in caplog.text

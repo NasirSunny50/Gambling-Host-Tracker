@@ -124,6 +124,17 @@ never clicks further, because the click after that one is the confirm.
 - **`started_at` before 2026-08-23** was stamped when the row was written, which is after
   collection returns — so older fetches all look instantaneous. Newer ones carry the true
   start.
+- **The portal and a fetch share one SQLite file, and that used to break the portal.**
+  A fetch runs in its own subprocess and writes accounts, evidence and observations in
+  bursts; under SQLite's default rollback journal that write lock is exclusive over the
+  whole file, so `/payees` answered **500 "database is locked"** while the fetch it was
+  reporting on ran perfectly. `db.py` now sets **WAL** on connect, which is the fix that
+  matters — readers no longer block on the writer at all — plus a 20s `busy_timeout` for
+  writes and `synchronous=NORMAL`. And `_log` no longer takes the page down with it: the
+  audit row gets its own short 2s deadline (`LOG_BUSY_TIMEOUT_MS`), and if it still cannot
+  be written the page is served, the session is rolled back so later queries work, and a
+  warning is logged. Verified by holding a write transaction open and loading every page:
+  all 200, worst case 2.3s, audit rows resuming the moment the lock clears.
 - **One fetch at a time, machine-wide.** The collector holds `data/run.lock` (pid + slug),
   so a scheduled fetch and a hand-started `ght run` cannot race on the login session.
 - **Rocket publishes twelve digits** — the wallet's mobile plus a check digit. The MSISDN

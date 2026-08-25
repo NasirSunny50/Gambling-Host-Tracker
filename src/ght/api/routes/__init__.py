@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import csv
 import io
+import logging
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta, timezone
@@ -24,14 +25,15 @@ from fastapi.responses import (
     StreamingResponse,
 )
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import String, func, literal, select, union_all
+from sqlalchemy import String, func, literal, select, text, union_all
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 from ght.api import ASSETS_DIR, TEMPLATES_DIR
 from ght.api.jobs import ALL_SITES, manager
 from ght.api.schedule import MIN_MINUTES, Scheduler
 from ght.config import REPO_ROOT, settings
-from ght.db import SessionLocal
+from ght.db import BUSY_TIMEOUT_MS, SessionLocal
 from ght.extractors.regex_sweep import page_text
 from ght.models import (
     AccessLog,
@@ -45,6 +47,8 @@ from ght.models import (
 )
 from ght.normalize.msisdn import translate_digits
 from ght.sources import scan_sources
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
@@ -76,8 +80,46 @@ def _actor(request: Request) -> str:
 
 
 def _log(session: Session, request: Request, action: str, params: dict, rows: int | None) -> None:
+    """Record who looked at what. Never at the cost of the page they were looking at.
+
+    The audit row matters - it is half the reason this data is kept - but it is a note
+    *about* a read, and a note that cannot be written is not a reason to refuse the read.
+    A fetch's write burst used to make this commit fail and take the whole page down with
+    it: `/payees` answered 500 while the fetch it was reporting on ran perfectly.
+
+    With WAL and a busy timeout on the engine this should no longer happen; if it does, the
+    page is served, the session is put back in a usable state for the queries that follow,
+    and the failure is written to the log where it can be noticed rather than swallowed.
+
+    The wait is deliberately short - much shorter than the engine's, which is sized for a
+    fetch's write bursts and must not give up on them. Nobody should sit in front of a
+    blank browser tab for twenty seconds while a note about their page load queues behind a
+    collector. Two seconds is long enough to ride out ordinary contention and short enough
+    that the page still feels like it loaded.
+    """
     session.add(AccessLog(actor=_actor(request), action=action, params=params, row_count=rows))
-    session.commit()
+    try:
+        _set_busy_timeout(session, LOG_BUSY_TIMEOUT_MS)
+        session.commit()
+    except OperationalError as exc:
+        session.rollback()
+        logger.warning("access log not written for %s %s: %s", action, params, exc.orig)
+    finally:
+        # Back to the engine's own deadline: this connection returns to the pool, and the
+        # next thing to use it may be a write that should wait properly.
+        _set_busy_timeout(session, BUSY_TIMEOUT_MS)
+
+
+# How long a page load waits for the audit row before giving up and rendering anyway.
+LOG_BUSY_TIMEOUT_MS = 2_000
+
+
+def _set_busy_timeout(session: Session, milliseconds: int) -> None:
+    """Change how long this connection waits for a locked database. SQLite only."""
+    try:
+        session.execute(text(f"PRAGMA busy_timeout={int(milliseconds)}"))
+    except Exception:  # noqa: BLE001, S110 - another engine has no such pragma
+        pass
 
 
 def _age(value: datetime | None) -> str:
