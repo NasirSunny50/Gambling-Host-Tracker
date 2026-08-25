@@ -138,6 +138,10 @@ the history is the **fetch history**. The code still calls the machinery the col
 pipeline and the table is still `collection_runs` — the rename is the vocabulary a reader
 sees, not an identifier sweep. Keep new user-facing wording on "fetch".
 
+The portal is called **Gambling Host Tracker** in full — sidebar, tab title, report footer.
+Pages carry their heading only; the line of explanation that used to sit under every
+heading was cut, because a sentence that never changes stops being read.
+
 Sidebar: Overview, Payees, Sites, Fetches. Theme toggle in the header. `/components` documents the
 recurring UI elements and the reasoning (not linked in the nav).
 
@@ -147,11 +151,12 @@ recurring UI elements and the reasoning (not linked in the nav).
   sites", which is a way of pointing a fetch rather than a site, and counting the list it
   sits in read 3 for the 2 sites that exist (`_tracked_sites` vs `_runnable_sites`). A row
   in Recent fetches opens `/runs/<id>`, the same as the row in the fetch history does.
-- **Sites** — one row per `sources/<slug>.yaml`: the name with the **URL being collected**
-  under it (not the slug — the slug is our filename, the URL is the thing), payees found,
-  fetches run, a link to its last fetch, and status last, because status is the column
-  that changes least. The list is the configs on disk; the database only supplies the
-  counts, so a site collected once and retired keeps its rows without still being a target.
+- **Sites** — one row per `sources/<slug>.yaml`: the name with the site's **base URL**
+  under it (not the slug, and not the deposit path — `_base_url` cuts it back to the host),
+  then payees found, fetches run, last fetch, status, and the link. Status sits late
+  because it is the column that changes least. The list is the configs on disk; the
+  database only supplies the counts, so a site collected once and retired keeps its rows
+  without still being a target.
 - **Payees** — one list of both kinds. Search + channel filter, per-page, CSV and PDF export.
   Copy icons sit on the number and on the holder name.
 - **Payee detail** — the identity (including **Found on**, the site that published it —
@@ -182,6 +187,14 @@ heading; a sentence that never changes stops being read after the second visit, 
 header is the heading alone. Don't add them back.
 
 Dates are Bangladesh format and +06:00 everywhere (`_stamp` / `_day` in `api/routes`).
+
+**The PDF report** (`export/report.py`) is set for a page that gets printed and photocopied:
+9.5pt body, 22pt rows, and a 12pt `GUTTER` that every column's width includes, so widening
+a column widens the gap with it. Bank and Last seen are sized to hold their longest real
+value uncut — a bank name abbreviated by the page is indistinguishable from one the site
+abbreviated, and a cut timestamp is not evidence. The header names the filters behind the
+report on their own labelled line (`_describe_scope`, worded the way the page's controls
+are); the footer is the product, who exported it, and the page number, and nothing else.
 
 ## The schedule
 
