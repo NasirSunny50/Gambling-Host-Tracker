@@ -138,14 +138,24 @@ the history is the **fetch history**. The code still calls the machinery the col
 pipeline and the table is still `collection_runs` — the rename is the vocabulary a reader
 sees, not an identifier sweep. Keep new user-facing wording on "fetch".
 
-Sidebar: Overview, Payees, Fetches. Theme toggle in the header. `/components` documents the
+Sidebar: Overview, Payees, Sites, Fetches. Theme toggle in the header. `/components` documents the
 recurring UI elements and the reasoning (not linked in the nav).
 
 - **Overview** — payees found, fetches run, sites tracked; payees by channel; newest payees.
-  All read the same query the Payees page reads, so they cannot drift apart.
+  All read the same query the Payees page reads, so they cannot drift apart. **Sites
+  tracked counts the configs, not the fetch dropdown** — the dropdown leads with "All
+  sites", which is a way of pointing a fetch rather than a site, and counting the list it
+  sits in read 3 for the 2 sites that exist (`_tracked_sites` vs `_runnable_sites`). A row
+  in Recent fetches opens `/runs/<id>`, the same as the row in the fetch history does.
+- **Sites** — one row per `sources/<slug>.yaml`: status, fetcher, methods (named probes
+  `+` discovered families), payees found, fetches run, and a link to its last fetch. The
+  list is the configs on disk; the database only supplies the counts, so a site collected
+  once and retired keeps its rows without still being a target.
 - **Payees** — one list of both kinds. Search + channel filter, per-page, CSV and PDF export.
   Copy icons sit on the number and on the holder name.
-- **Payee detail** — the identity, the sightings, and one screenshot **of the panel that
+- **Payee detail** — the identity (including **Found on**, the site that published it —
+  the first thing asked of a number bound for a blocklist, so it sits with the identity
+  rather than in a panel further down), the sightings, and one screenshot **of the panel that
   published that number**. Which screenshot that is has to be established, not assumed: see
   `_screenshot_for` in `api/routes`. Where no stored page can be shown to carry the number,
   no picture is shown — another method's screenshot is evidence of the wrong thing.
