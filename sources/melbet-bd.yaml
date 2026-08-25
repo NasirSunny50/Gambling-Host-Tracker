@@ -191,79 +191,6 @@ probes:
         value: ".modal-message-address"
         bank_name: "Dutch-Bangla Bank"
 
-  # Bank Transfer shows nothing until a recipient bank is chosen, so it takes one probe per
-  # option in its dropdown. Choosing one fills the modal in place - no further click - with
-  # the account number, the bank as the site writes it, and the account holder, each in its
-  # own copyable element.
-  #
-  # The option labels are quoted exactly as the site renders them, numbering and stray
-  # punctuation included ("1.UCB Bank", "2. Pubali Bank."). They are the site's own wording
-  # and they drift; a label that no longer matches fails the probe fast and names what the
-  # dropdown offers instead, which is a one-line fix here.
-  #
-  # `bank_name` is set from the option rather than read off the page: the page's own Bank
-  # Name field carries the operator's shorthand ("Islami Bank,CellFin.") rather than the
-  # institution, and a blocklist needs the institution.
-  - name: bank-ucb
-    flow:
-      - click: '.payment-cell[data-method="melbet_bt_bangla"]'
-        wait_for: '.modal-payment.active select[name="bank"]'
-      - select: 'select[name="bank"]'
-        option: "1.UCB Bank"
-        wait_for: ".modal-payment.active .modal-message-address"
-    wait_for: ".modal-payment.active .modal-message-address"
-    blocks:
-      - channel: bank_transfer
-        container: ".modal-payment.active .payment_modal_body"
-        value: ".payment_modal_row:nth-of-type(2) .modal-message-address"
-        holder: ".payment_modal_row:nth-of-type(4) .modal-message-address"
-        bank_name: "United Commercial Bank"
-
-  - name: bank-pubali
-    flow:
-      - click: '.payment-cell[data-method="melbet_bt_bangla"]'
-        wait_for: '.modal-payment.active select[name="bank"]'
-      - select: 'select[name="bank"]'
-        option: "2. Pubali Bank."
-        wait_for: ".modal-payment.active .modal-message-address"
-    wait_for: ".modal-payment.active .modal-message-address"
-    blocks:
-      - channel: bank_transfer
-        container: ".modal-payment.active .payment_modal_body"
-        value: ".payment_modal_row:nth-of-type(2) .modal-message-address"
-        holder: ".payment_modal_row:nth-of-type(4) .modal-message-address"
-        bank_name: "Pubali Bank"
-
-  - name: bank-dutch-bangla
-    flow:
-      - click: '.payment-cell[data-method="melbet_bt_bangla"]'
-        wait_for: '.modal-payment.active select[name="bank"]'
-      - select: 'select[name="bank"]'
-        option: "DUTCH BANGLA BANK,"
-        wait_for: ".modal-payment.active .modal-message-address"
-    wait_for: ".modal-payment.active .modal-message-address"
-    blocks:
-      - channel: bank_transfer
-        container: ".modal-payment.active .payment_modal_body"
-        value: ".payment_modal_row:nth-of-type(2) .modal-message-address"
-        holder: ".payment_modal_row:nth-of-type(4) .modal-message-address"
-        bank_name: "Dutch-Bangla Bank"
-
-  - name: bank-islami
-    flow:
-      - click: '.payment-cell[data-method="melbet_bt_bangla"]'
-        wait_for: '.modal-payment.active select[name="bank"]'
-      - select: 'select[name="bank"]'
-        option: "Islami Bank"
-        wait_for: ".modal-payment.active .modal-message-address"
-    wait_for: ".modal-payment.active .modal-message-address"
-    blocks:
-      - channel: bank_transfer
-        container: ".modal-payment.active .payment_modal_body"
-        value: ".payment_modal_row:nth-of-type(2) .modal-message-address"
-        holder: ".payment_modal_row:nth-of-type(4) .modal-message-address"
-        bank_name: "Islami Bank Bangladesh"
-
   # Nagad by Paykassma. This one has to be paid for to be read: the payee only exists once
   # a deposit request has been raised, so every run of this probe raises one - a real
   # request on the operator, for 200 BDT, which is never paid and cannot be, because
@@ -302,6 +229,59 @@ probes:
 #     that is not on the page can only time out and report itself as broken, so it is left
 #     out rather than left to cry wolf; the id above is what to search for if it returns.
 
+discover:
+  # Every E-wallets cell that is a bKash / Nagad / Upay under any name. Scoped to the
+  # E-wallets section so the Recommended duplicates, the card systems and the crypto list
+  # are left alone.
+  #
+  # This is how Bkash Free is collected: the section carries `bkash_merchant_melbet`
+  # ("Bkash Free") and there has never been a bKash probe here, so the site's whole bKash
+  # side went uncollected while the fixed list only ever saw the methods someone had
+  # written down. Nagad and Upay overlap with the probes above on purpose - the same
+  # de-duplication that handles one account seen twice handles this, and the point of a
+  # discovery is that the *next* "Super Bkash" or "The Local Nagad" is collected without a
+  # config edit.
+  #
+  # Only the modal is opened, never a confirm, so this can never raise a deposit request -
+  # including on Nagad by Paykassma, whose cell the nagad match also opens. That one shows
+  # a redirect form and no number, so it yields nothing here; its name still comes from the
+  # explicit `nagad-paykassma` probe, which is the only thing that pays for it.
+  - name: e-wallet
+    kind: cells
+    items: '.section-block:has(.section_name_title:has-text("E-wallets")) .payment-cell'
+    label: ".payment-cell-name__caption--is-title"
+    # The panel's frame appears seconds before its cells do; wait for any cell first.
+    ready: ".payment-cell"
+    match: [bkash, nagad, upay]
+    wait_for: ".modal-payment.active"
+    container: ".modal-payment.active"
+    value: ".modal-payment.active .payment_modal_input--html, .modal-payment.active .modal-message-address"
+
+  # Bank Transfer, walked one recipient bank at a time. This replaces four probes that
+  # named their options verbatim ("1.UCB Bank", "2. Pubali Bank.", "DUTCH BANGLA BANK,");
+  # the site re-labelled the dropdown and three of the four stopped matching, so three
+  # banks went uncollected and reported themselves as a stale config every run - which they
+  # were. Reading the options off the page instead means a re-labelled, added or dropped
+  # bank is picked up on the next fetch rather than by hand.
+  #
+  # Live 2026-08-25 the dropdown offered seven: City Bank, DBBL Bank, EBL Bank, Islami
+  # Bank, Premier Bank, Pubali Bank, UCB Bank. Choosing one fills the modal in place with
+  # that bank's account - no confirm, so no order. The account sits in the 2nd modal row
+  # and the holder in the 4th (1xBet uses the 3rd; this brand does not).
+  - name: bank
+    kind: options
+    channel: bank_transfer
+    ready: ".payment-cell"
+    open:
+      - click: '.payment-cell[data-method="melbet_bt_bangla"]'
+        wait_for: '.modal-payment.active select[name="bank"]'
+    items: '.modal-payment.active select[name="bank"]'
+    skip_options: ["0", "Select recipient's bank"]
+    wait_for: ".modal-payment.active .payment_modal_row:nth-of-type(2) .modal-message-address"
+    container: ".modal-payment.active"
+    value: ".payment_modal_row:nth-of-type(2) .modal-message-address"
+    holder: ".payment_modal_row:nth-of-type(4) .modal-message-address"
+
 ignore_numbers: []
 
 notes: |
@@ -323,3 +303,26 @@ notes: |
       `.payment_modal_input--html` and `.modal-message-address`, and it differs per method
     - the Bank Transfer dropdown's option labels, which are the site's own wording and
       drift - a mismatch has to fail fast and name the current options
+
+  2026-08-25 live recon (session valid, no CAPTCHA). Two things the fixed probe list was
+  missing, both now discoveries:
+
+    - The Bank Transfer dropdown offers SEVEN banks - City Bank, DBBL Bank, EBL Bank,
+      Islami Bank, Premier Bank, Pubali Bank, UCB Bank - and the site had re-labelled every
+      one of them. The four hardcoded probes matched their old wording ("1.UCB Bank",
+      "2. Pubali Bank.", "DUTCH BANGLA BANK,"), so three failed every fetch and reported a
+      stale config, which was exactly right, and the three banks behind them went
+      uncollected. Replaced by `discover: bank` (kind: options), which reads the labels off
+      the page. The failure mode was doing its job - it named the problem for two days
+      before anyone read it.
+
+    - The E-wallets section carries `bkash_merchant_melbet` ("Bkash Free") and there was no
+      bKash probe at all, so this brand's bKash side was never collected. `discover:
+      e-wallet` now walks every E-wallets cell whose name carries bkash / nagad / upay.
+      Section markup is identical to 1xBet's - `.section-block` > `.section_name_title`,
+      cells named by `.payment-cell-name__caption--is-title` - confirmed against a captured
+      panel, so the other brand's selectors transfer as they are.
+
+  E-wallets cells as at 2026-08-25: Cellfin Free, Nagad, Rocket, Nagad by Paykassma, uPay,
+  Nagad Free, Trust Axiata Pay, Rocket Free, Bkash Free, iPay, then the non-BD wallets
+  (WebMoney, MiFinity, Skrill, MoneyGO, BinancePay, BybitPay, KuCoin, Bitget).
