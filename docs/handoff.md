@@ -238,7 +238,21 @@ deposit request. The next fetch is always one interval away.
 
 ## Melbet notes
 
-Thirteen numbered payees and one name, from fourteen probes: CellFin Free, Nagad, Rocket,
+**Banks and bKash are discovered at run time now, not named.** `discover: bank`
+(`kind: options`) walks the recipient-bank dropdown — seven live as at 2026-08-25: City,
+DBBL, EBL, Islami, Premier, Pubali, UCB — because the site re-labelled every option and
+three of the four hardcoded probes had stopped matching. `discover: e-wallet`
+(`kind: cells`) walks the E-wallets section for bkash / nagad / upay, which is how **Bkash
+Free** is collected; this brand had no bKash probe at all before.
+
+**`skip_keys` on a cells discovery** leaves `nagad_melbet_p2c` alone. Its cell matches
+"nagad" but it takes the whole tab to the provider's checkout, and live the panel did not
+come back — so uPay, Nagad Free and Bkash Free were never opened and the bank discovery
+that runs next got no panel either, all under a fetch reporting `ok`. A cut-short walk and
+a discovery that never got a panel are both recorded as failures now.
+
+The older probe list, for context — thirteen numbered payees and one name, from fourteen
+probes: CellFin Free, Nagad, Rocket,
 uPay, Nagad Free (which prints the business name beside the number), Trust Axiata Pay,
 Rocket Free, iPay, Nexus Pay, and Bank Transfer once per bank in its dropdown (UCB, Pubali,
 Dutch-Bangla, Islami). `nagad-paykassma` is the fourteenth and the only one that costs a
