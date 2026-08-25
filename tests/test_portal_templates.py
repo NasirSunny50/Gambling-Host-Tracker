@@ -811,16 +811,16 @@ def test_the_sites_page_names_the_targets_and_what_each_brought_back():
         "sites.html",
         rows=[
             {"slug": "1xbet-bd", "name": "1xBet Bangladesh", "status": "active",
-             "fetcher": "browser", "url": "https://1xbet.test/office/recharge",
+             "fetcher": "browser", "url": "https://1xbet.test",
              "broken": False, "fetches": 40, "accounts": 12, "names": 3, "payees": 15,
              "last": run_row(id=88)},
             {"slug": "melbet-bd", "name": "Melbet Bangladesh", "status": "paused",
-             "fetcher": "browser", "url": "https://melbet.test/deposit", "broken": False,
+             "fetcher": "browser", "url": "https://melbet.test", "broken": False,
              "fetches": 0, "accounts": 0, "names": 0, "payees": 0, "last": None},
         ],
     )
     assert "1xBet Bangladesh" in html and "Melbet Bangladesh" in html
-    assert "https://1xbet.test/office/recharge" in html   # the address, not the slug
+    assert "https://1xbet.test" in html          # the address, not the slug
     assert ">15<" in html                       # payees found on the first site
     assert 'href="/runs/88"' in html            # straight to its last fetch
     assert "never" in html                      # a configured site nobody has fetched yet
@@ -879,3 +879,13 @@ def test_a_payee_says_which_site_published_it():
     )
     assert "Found on" in named
     assert "1xbet-bd" in named
+
+
+def test_a_site_shows_its_address_not_the_page_we_collect_from():
+    """The deposit path is a detail of how we collect. What identifies the site to a reader
+    is the host, and a full URL down to /office/recharge pushed the column wide for it."""
+    from ght.api.routes import _base_url
+
+    assert _base_url("https://bd.1xbet.com/office/recharge?x=1") == "https://bd.1xbet.com"
+    assert _base_url("https://melbet-76956.bar") == "https://melbet-76956.bar"
+    assert _base_url("") == ""

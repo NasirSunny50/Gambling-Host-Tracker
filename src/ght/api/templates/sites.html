@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% import "_macros.html" as ui %}
 {% set page = "sites" %}
-{% block title %}Sites tracked — Host Tracker{% endblock %}
+{% block title %}Sites tracked — Gambling Host Tracker{% endblock %}
 {% block heading %}Sites tracked{% endblock %}
 {% block body %}
 
@@ -12,13 +12,14 @@
      that has never been fetched is still tracked, and a site that was collected once and
      retired keeps its rows without being tracked any more.
 
-     Status sits last on purpose. It is the column that changes least - two active sites
+     Status sits late on purpose. It is the column that changes least - two active sites
      stay active for months - so putting it first spent the reader's first glance on the
-     thing least likely to have moved. #}
+     thing least likely to have moved. It still comes before the link, which belongs at
+     the end of the row where a reader's eye leaves it. #}
   {% call ui.table([
       "Site",
       "#Payees|Numbered accounts plus name-only payees found on this site",
-      "#Fetches", "Last fetch", "", "Status"]) %}
+      "#Fetches", "Last fetch", "Status", ""]) %}
     {% for r in rows %}
     <tr>
       <td>
@@ -33,13 +34,13 @@
         {%- if r.last %}{{ r.last.started_at | stamp }}{% else %}<span class="mute">never</span>{% endif -%}
       </td>
       <td class="nowrap">
-        {%- if r.last %}<a href="/runs/{{ r.last.id }}">Last fetch &rsaquo;</a>
-        {%- else %}<a href="/runs">Fetch &rsaquo;</a>{% endif -%}
-      </td>
-      <td class="nowrap">
         {% if r.broken %}{{ ui.tag("config unreadable", "warn") }}
         {% elif r.status == "active" %}{{ ui.tag("active", "ok") }}
         {% else %}{{ ui.tag(r.status) }}{% endif %}
+      </td>
+      <td class="nowrap">
+        {%- if r.last %}<a href="/runs/{{ r.last.id }}">Last fetch &rsaquo;</a>
+        {%- else %}<a href="/runs">Fetch &rsaquo;</a>{% endif -%}
       </td>
     </tr>
     {% else %}

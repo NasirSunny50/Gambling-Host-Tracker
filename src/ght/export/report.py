@@ -87,14 +87,25 @@ class Column:
     align: str = "left"
 
 
+# Space between one column's text and the next column's edge. Every width below includes
+# it, so widening a column widens the gap with it and the table cannot go back to looking
+# packed. Without it the columns sat flush and the page read as one block of text.
+GUTTER = 12
+
+# Landscape A4 leaves 774pt between the margins. These add to 772, so the table uses the
+# width it has: two columns were being truncated while a sixth of the page stayed blank.
+# Bank and Last seen are sized to hold their longest real value uncut - a full bank name
+# ("Dutch-Bangla Bank Limited") and a full timestamp with the date, time and meridiem -
+# because a bank abbreviated by the page and a bank abbreviated by the site look the same
+# to a reader, and a truncated timestamp is not evidence of anything.
 COLUMNS = (
-    Column("channel", "Channel", 68),
-    Column("number", "Account number", 118),
-    Column("name", "Name", 132),
-    Column("bank", "Bank", 96),
-    Column("site", "Site", 74),
-    Column("times", "Seen", 34, align="right"),
-    Column("last_seen", "Last seen", 92),
+    Column("channel", "Channel", 78),
+    Column("number", "Account number", 132),
+    Column("name", "Name", 152),
+    Column("bank", "Bank", 152),
+    Column("site", "Site", 82),
+    Column("times", "Seen", 40, align="right"),
+    Column("last_seen", "Last seen", 136),
 )
 
 
@@ -120,11 +131,16 @@ class _Report:
     """Draws the document. One instance per file, so page numbering stays honest."""
 
     PAGE_MARGIN = 34
-    HEADER_HEIGHT = 62
+    HEADER_HEIGHT = 80
     FOOTER_HEIGHT = 34
-    ROW_HEIGHT = 17
-    HEAD_SIZE = 7.5
-    BODY_SIZE = 8
+    # A row of text needs air above and below it as much as it needs it on either side.
+    # At 17pt the lines nearly touched, which is what made the table read as congested
+    # even where nothing was actually truncated.
+    ROW_HEIGHT = 22
+    HEAD_SIZE = 8.5
+    # This is printed and photocopied, and 8pt does not survive either. 9.5 is the
+    # smallest size that still holds every column on one landscape sheet.
+    BODY_SIZE = 9.5
 
     def __init__(self, canvas, page_size, meta: dict, body_font: str = "Helvetica"):
         self.c = canvas
@@ -145,36 +161,53 @@ class _Report:
         # header simply carries no mark rather than failing the export.
         if LOGO_PATH.exists():
             c.drawImage(
-                str(LOGO_PATH), left, h - 46, 22, 22, mask="auto", preserveAspectRatio=True
+                str(LOGO_PATH), left, h - 48, 26, 26, mask="auto", preserveAspectRatio=True
             )
 
         c.setFillColorRGB(*INK)
-        c.setFont("Helvetica-Bold", 12)
-        c.drawString(left + 30, h - 32, TITLE)
+        c.setFont("Helvetica-Bold", 14)
+        c.drawString(left + 34, h - 34, TITLE)
         c.setFillColorRGB(*QUIET)
-        c.setFont("Helvetica", 7.5)
-        c.drawString(left + 30, h - 42, SUBTITLE)
+        c.setFont("Helvetica", 8.5)
+        c.drawString(left + 34, h - 45, SUBTITLE)
 
-        c.setFont("Helvetica", 7.5)
-        c.drawRightString(right, h - 32, self.meta["generated"])
-        c.drawRightString(right, h - 42, self.meta["scope"])
+        c.setFont("Helvetica", 8.5)
+        c.drawRightString(right, h - 34, self.meta["generated"])
+        c.drawRightString(right, h - 45, self.meta["count"])
+
+        # What this is a report *of*, on its own line and in the reading ink rather than
+        # the grey used for furniture. It was a small grey note beside the timestamp, which
+        # is where a reader's eye goes last - and a filtered report mistaken for the whole
+        # picture is the one way this document can actively mislead someone.
+        c.setFillColorRGB(*INK)
+        c.setFont("Helvetica-Bold", 8.5)
+        c.drawString(left, h - 63, "Filters")
+        c.setFont("Helvetica", 9)
+        c.drawString(left + 42, h - 63, self.meta["scope"])
 
         c.setStrokeColorRGB(*RULE)
         c.setLineWidth(0.6)
-        c.line(left, h - 54, right, h - 54)
+        c.line(left, h - 72, right, h - 72)
 
     def footer(self) -> None:
+        """The product, who exported it, and which page this is. Nothing else.
+
+        It used to carry a sentence about the retention policy on every page. A line
+        repeated on every sheet of a document stops being read on the second sheet, and
+        the policy is not something a payee list is the right place to assert.
+        """
         c, w = self.c, self.width
         left, right = self.PAGE_MARGIN, w - self.PAGE_MARGIN
         y = self.FOOTER_HEIGHT
 
         c.setStrokeColorRGB(*RULE)
         c.setLineWidth(0.6)
-        c.line(left, y + 12, right, y + 12)
+        c.line(left, y + 13, right, y + 13)
 
         c.setFillColorRGB(*QUIET)
-        c.setFont("Helvetica", 6.8)
-        c.drawString(left, y, self.meta["footer"])
+        c.setFont("Helvetica", 8)
+        c.drawString(left, y, "Gambling Host Tracker")
+        c.drawCentredString(w / 2, y, self.meta["actor"])
         # Every page says which it is, because pages get separated from their cover sheet.
         c.drawRightString(right, y, f"Page {self.page}")
 
@@ -184,19 +217,19 @@ class _Report:
             self.c.showPage()
         self.page += 1
         self.header()
-        self.y = self.height - self.HEADER_HEIGHT - 18
+        self.y = self.height - self.HEADER_HEIGHT - 20
         self.column_heads()
 
     def column_heads(self) -> None:
         c = self.c
         x = self.PAGE_MARGIN
         c.setFillColorRGB(*BAND)
-        c.rect(self.PAGE_MARGIN, self.y - 5, self.width - 2 * self.PAGE_MARGIN, 15, stroke=0, fill=1)
+        c.rect(self.PAGE_MARGIN, self.y - 6, self.width - 2 * self.PAGE_MARGIN, 18, stroke=0, fill=1)
         c.setFillColorRGB(*QUIET)
         c.setFont("Helvetica-Bold", self.HEAD_SIZE)
         for col in COLUMNS:
             if col.align == "right":
-                c.drawRightString(x + col.width - 6, self.y, col.label.upper())
+                c.drawRightString(x + col.width - GUTTER, self.y, col.label.upper())
             else:
                 c.drawString(x, self.y, col.label.upper())
             x += col.width
@@ -211,7 +244,7 @@ class _Report:
         c = self.c
         if shaded:
             c.setFillColorRGB(*BAND)
-            c.rect(self.PAGE_MARGIN, self.y - 4.5, self.width - 2 * self.PAGE_MARGIN,
+            c.rect(self.PAGE_MARGIN, self.y - 6, self.width - 2 * self.PAGE_MARGIN,
                    self.ROW_HEIGHT - 2, stroke=0, fill=1)
 
         x = self.PAGE_MARGIN
@@ -221,17 +254,17 @@ class _Report:
             font = "Courier" if col.key in ("number", "last_seen") else self.body_font
             c.setFillColorRGB(*(QUIET if raw in (None, "", "—") else INK))
             shown = _latin_safe(str(raw), font) if raw not in (None, "") else "—"
-            text = _clip(c, shown, col.width - 8, font, self.BODY_SIZE)
+            text = _clip(c, shown, col.width - GUTTER, font, self.BODY_SIZE)
             c.setFont(font, self.BODY_SIZE)
             if col.align == "right":
-                c.drawRightString(x + col.width - 6, self.y, text)
+                c.drawRightString(x + col.width - GUTTER, self.y, text)
             else:
                 c.drawString(x, self.y, text)
             x += col.width
 
         c.setStrokeColorRGB(*RULE)
         c.setLineWidth(0.25)
-        c.line(self.PAGE_MARGIN, self.y - 5, self.width - self.PAGE_MARGIN, self.y - 5)
+        c.line(self.PAGE_MARGIN, self.y - 7, self.width - self.PAGE_MARGIN, self.y - 7)
         self.y -= self.ROW_HEIGHT
 
     def total(self, count: int) -> None:
@@ -239,7 +272,7 @@ class _Report:
         if self.y < self.FOOTER_HEIGHT + 26:
             self.new_page()
         self.c.setFillColorRGB(*INK)
-        self.c.setFont("Helvetica-Bold", 8)
+        self.c.setFont("Helvetica-Bold", 9.5)
         self.c.drawString(self.PAGE_MARGIN, self.y, f"{count} payees in this report")
 
 
@@ -265,10 +298,8 @@ def build_pdf(rows: list[dict], *, scope: str, actor: str, channel_labels: dict)
     meta = {
         "generated": f"Generated {now:%d/%m/%Y %I:%M %p}",
         "scope": scope,
-        "footer": (
-            f"Gambling Host Tracker · exported by {actor} · "
-            "collected evidence retained under the organisation's PII and AML policy"
-        ),
+        "count": f"{len(rows)} payee{'' if len(rows) == 1 else 's'}",
+        "actor": f"Exported by {actor}",
     }
 
     report = _Report(c, page_size, meta, body_font=_register_body_font())

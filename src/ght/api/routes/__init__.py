@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta, timezone
 from math import ceil
 from pathlib import Path
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, Form, Request, Response
 from fastapi.responses import (
@@ -750,6 +751,14 @@ def account_detail(account_id: int, request: Request, session: Session = Depends
     )
 
 
+def _base_url(url: str) -> str:
+    """Just the site's address - scheme and host, no path."""
+    if not url:
+        return ""
+    parsed = urlparse(url)
+    return f"{parsed.scheme}://{parsed.netloc}" if parsed.netloc else url
+
+
 def _tracked_sites() -> list[dict]:
     """The sites this install is configured to collect - one per config file, nothing else.
 
@@ -768,10 +777,12 @@ def _tracked_sites() -> list[dict]:
             # The address being collected, so a reader can see what the slug stands for.
             # The current deposit URL if the config marks one, else whatever it lists
             # first - these operators rotate domains, so a config carries the mirrors too.
-            "url": next(
+            # Cut back to the host: the deposit path is a detail of how we collect, and a
+            # full URL down to /office/recharge pushed the column wide for nothing.
+            "url": _base_url(next(
                 (u.url for u in config.urls if u.current),
                 config.urls[0].url if config.urls else "",
-            ),
+            )),
             "broken": False,
         }
         for config in configs
@@ -1146,15 +1157,21 @@ def payees_pdf(
 
 
 def _describe_scope(channel: str | None, q: str | None, run_row) -> str:
-    """One line naming the filters behind a report, so it cannot be mistaken for all of it."""
+    """The filters behind a report, named the way the page names them.
+
+    Each filter says which control it came from - Channel, Search, Fetch - rather than
+    running the values together, because a reader holding the printed page cannot see the
+    form that produced it. A report with no filters says so outright: a blank there would
+    read as a filter nobody wrote down.
+    """
     parts = []
     if run_row is not None:
-        parts.append(f"fetch #{run_row.id}")
+        parts.append(f"Fetch #{run_row.id}")
     if channel:
-        parts.append(CHANNEL_LABELS.get(channel, channel))
+        parts.append(f"Channel: {CHANNEL_LABELS.get(channel, channel)}")
     if q:
-        parts.append(f'matching "{q.strip()}"')
-    return "Filtered to " + ", ".join(parts) if parts else "All payees, all sites"
+        parts.append(f'Search: "{q.strip()}"')
+    return " · ".join(parts) if parts else "None — every payee, every site"
 
 
 @router.get("/accounts.csv")
