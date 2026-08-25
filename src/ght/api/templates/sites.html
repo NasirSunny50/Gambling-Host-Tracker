@@ -3,7 +3,6 @@
 {% set page = "sites" %}
 {% block title %}Sites tracked — Host Tracker{% endblock %}
 {% block heading %}Sites tracked{% endblock %}
-{% block subtitle %}The targets configured on this machine, and what each has brought back{% endblock %}
 {% block body %}
 
 <p class="back"><a href="/">&lsaquo; Back to overview</a></p>
@@ -11,28 +10,22 @@
 <section class="panel">
   {# One row per config file. The database supplies the counts, never the list: a site
      that has never been fetched is still tracked, and a site that was collected once and
-     retired keeps its rows without being tracked any more. #}
+     retired keeps its rows without being tracked any more.
+
+     Status sits last on purpose. It is the column that changes least - two active sites
+     stay active for months - so putting it first spent the reader's first glance on the
+     thing least likely to have moved. #}
   {% call ui.table([
-      "Site", "Status", "Fetcher",
-      "Methods|Named probes in the config, plus the families discovered while a fetch runs",
-      "Payees|Numbered accounts plus name-only payees found on this site",
-      "Fetches", "Last fetch", ""]) %}
+      "Site",
+      "#Payees|Numbered accounts plus name-only payees found on this site",
+      "#Fetches", "Last fetch", "", "Status"]) %}
     {% for r in rows %}
     <tr>
       <td>
         <span class="strong">{{ r.name }}</span>
-        <span class="site-slug mono">{{ r.slug }}</span>
-      </td>
-      <td class="nowrap">
-        {% if r.broken %}{{ ui.tag("config unreadable", "warn") }}
-        {% elif r.status == "active" %}{{ ui.tag("active", "ok") }}
-        {% else %}{{ ui.tag(r.status) }}{% endif %}
-      </td>
-      <td class="dim nowrap">{{ r.fetcher or "—" }}</td>
-      <td class="num mono">
-        {%- if r.broken %}<span class="mute">—</span>
-        {%- else %}{{ r.probes }}{% if r.discoveries %}<span class="mute"> +{{ r.discoveries }}</span>{% endif %}
-        {%- endif -%}
+        {# The address, not the slug: the slug is our filename for the site, the URL is
+           what is actually being collected. #}
+        <span class="site-url mono" title="{{ r.url }}">{{ r.url or "—" }}</span>
       </td>
       <td class="num mono {{ '' if r.payees else 'mute' }}">{{ r.payees }}</td>
       <td class="num mono {{ '' if r.fetches else 'mute' }}">{{ r.fetches }}</td>
@@ -43,9 +36,14 @@
         {%- if r.last %}<a href="/runs/{{ r.last.id }}">Last fetch &rsaquo;</a>
         {%- else %}<a href="/runs">Fetch &rsaquo;</a>{% endif -%}
       </td>
+      <td class="nowrap">
+        {% if r.broken %}{{ ui.tag("config unreadable", "warn") }}
+        {% elif r.status == "active" %}{{ ui.tag("active", "ok") }}
+        {% else %}{{ ui.tag(r.status) }}{% endif %}
+      </td>
     </tr>
     {% else %}
-    <tr><td colspan="8">
+    <tr><td colspan="6">
       <div class="quiet-empty">No site configs found. A target is one
         <span class="mono">sources/&lt;slug&gt;.yaml</span> file.</div>
     </td></tr>
@@ -53,18 +51,11 @@
   {% endcall %}
 </section>
 
-<p class="why">
-  This list comes from <span class="mono">sources/</span>, not from the database. The
-  extraction rules for a site live in its config file, so the files are what the collector
-  can be pointed at &mdash; and a site that was collected once and then retired keeps its
-  stored runs and evidence without still being a target.
-</p>
-
 <style>
   .back { margin:0 0 14px; font-size:13px; }
   .back a { color:var(--text-2); }
-  .site-slug { display:block; font-size:12px; color:var(--text-3); }
-  .why { margin:14px 0 0; font-size:12.5px; color:var(--text-3); line-height:1.5; max-width:70ch; }
+  .site-url { display:block; font-size:12px; color:var(--text-3); max-width:46ch;
+              overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .quiet-empty { padding:28px 20px; color:var(--text-2); text-align:center; font-size:13px; }
 </style>
 

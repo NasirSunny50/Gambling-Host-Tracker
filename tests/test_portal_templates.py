@@ -805,23 +805,40 @@ def test_sites_tracked_does_not_count_the_all_sites_choice(monkeypatch, tmp_path
 
 def test_the_sites_page_names_the_targets_and_what_each_brought_back():
     """The figure raises a question it cannot answer - which sites? - so it links to a page
-    that names them, with each one's fetches and payees beside it."""
+    that names them, with each one's fetches and payees beside it. The name is ours; the
+    address under it is what is actually being collected."""
     html = render(
         "sites.html",
         rows=[
             {"slug": "1xbet-bd", "name": "1xBet Bangladesh", "status": "active",
-             "fetcher": "browser", "probes": 5, "discoveries": 2, "broken": False,
-             "fetches": 40, "accounts": 12, "names": 3, "payees": 15, "last": run_row(id=88)},
+             "fetcher": "browser", "url": "https://1xbet.test/office/recharge",
+             "broken": False, "fetches": 40, "accounts": 12, "names": 3, "payees": 15,
+             "last": run_row(id=88)},
             {"slug": "melbet-bd", "name": "Melbet Bangladesh", "status": "paused",
-             "fetcher": "browser", "probes": 14, "discoveries": 0, "broken": False,
+             "fetcher": "browser", "url": "https://melbet.test/deposit", "broken": False,
              "fetches": 0, "accounts": 0, "names": 0, "payees": 0, "last": None},
         ],
     )
-    assert "1xBet Bangladesh" in html and "melbet-bd" in html
+    assert "1xBet Bangladesh" in html and "Melbet Bangladesh" in html
+    assert "https://1xbet.test/office/recharge" in html   # the address, not the slug
     assert ">15<" in html                       # payees found on the first site
     assert 'href="/runs/88"' in html            # straight to its last fetch
     assert "never" in html                      # a configured site nobody has fetched yet
     assert "paused" in html
+
+
+def test_a_page_heading_stands_on_its_own():
+    """Every page carried an unchanging line of explanation under its name. A sentence
+    that never changes stops being read after the second visit, so the header is the
+    heading alone."""
+    html = render(
+        "sites.html",
+        rows=[{"slug": "1xbet-bd", "name": "1xBet Bangladesh", "status": "active",
+               "fetcher": "browser", "url": "https://1xbet.test/", "broken": False,
+               "fetches": 1, "accounts": 1, "names": 0, "payees": 1, "last": None}],
+    )
+    assert "Sites tracked" in html
+    assert "subtitle" not in html
 
 
 def test_a_recent_fetch_on_the_overview_opens_the_same_page_the_history_does():

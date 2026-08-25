@@ -765,11 +765,13 @@ def _tracked_sites() -> list[dict]:
             "name": config.name,
             "status": config.status,
             "fetcher": config.fetcher,
-            # How many methods the config walks: the named probes plus the families found
-            # at run time. A discovery stands for however many cells the site is showing
-            # today, so this is a floor, not an exact count.
-            "probes": len(config.probes),
-            "discoveries": len(config.discover),
+            # The address being collected, so a reader can see what the slug stands for.
+            # The current deposit URL if the config marks one, else whatever it lists
+            # first - these operators rotate domains, so a config carries the mirrors too.
+            "url": next(
+                (u.url for u in config.urls if u.current),
+                config.urls[0].url if config.urls else "",
+            ),
             "broken": False,
         }
         for config in configs
@@ -785,7 +787,7 @@ def _tracked_sites() -> list[dict]:
         if slug not in known:
             sites.append({
                 "slug": slug, "name": slug, "status": "active", "fetcher": "",
-                "probes": 0, "discoveries": 0, "broken": True,
+                "url": "", "broken": True,
             })
     return sites
 

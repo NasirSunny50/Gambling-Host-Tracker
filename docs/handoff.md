@@ -147,10 +147,11 @@ recurring UI elements and the reasoning (not linked in the nav).
   sites", which is a way of pointing a fetch rather than a site, and counting the list it
   sits in read 3 for the 2 sites that exist (`_tracked_sites` vs `_runnable_sites`). A row
   in Recent fetches opens `/runs/<id>`, the same as the row in the fetch history does.
-- **Sites** — one row per `sources/<slug>.yaml`: status, fetcher, methods (named probes
-  `+` discovered families), payees found, fetches run, and a link to its last fetch. The
-  list is the configs on disk; the database only supplies the counts, so a site collected
-  once and retired keeps its rows without still being a target.
+- **Sites** — one row per `sources/<slug>.yaml`: the name with the **URL being collected**
+  under it (not the slug — the slug is our filename, the URL is the thing), payees found,
+  fetches run, a link to its last fetch, and status last, because status is the column
+  that changes least. The list is the configs on disk; the database only supplies the
+  counts, so a site collected once and retired keeps its rows without still being a target.
 - **Payees** — one list of both kinds. Search + channel filter, per-page, CSV and PDF export.
   Copy icons sit on the number and on the holder name.
 - **Payee detail** — the identity (including **Found on**, the site that published it —
@@ -175,6 +176,10 @@ recurring UI elements and the reasoning (not linked in the nav).
   decided *after* unparseable configs are folded back in, so a config newer than the running
   portal's code cannot make the choice vanish — that config still parses fine in the fresh
   subprocess a fetch spawns.
+
+**No page carries a subtitle.** Each one used to explain itself in a line under its
+heading; a sentence that never changes stops being read after the second visit, so the
+header is the heading alone. Don't add them back.
 
 Dates are Bangladesh format and +06:00 everywhere (`_stamp` / `_day` in `api/routes`).
 
