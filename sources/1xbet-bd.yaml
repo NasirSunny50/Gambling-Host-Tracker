@@ -18,14 +18,18 @@ auth_state: data/auth/1xbet-bd.json
 # site redesigns. Because 1xBet shows a CAPTCHA, this is assisted (see below): a run that
 # finds the session expired opens a visible browser for the operator to sign in.
 login:
-  # The account page redirects here when the session is dead.
+  # The account page redirects here when the session is dead. The form renders on this page
+  # on its own (a few seconds in), so there is no "open the form" click - a stray one landed
+  # on the header's Log in dropdown-trigger and opened a second form.
   url: https://bd.1xbet.com/en/user/login
-  # The header "Log in" opens the auth form before the fields exist (harmless if already
-  # on the login page — a missing element is ignored in assisted mode).
-  open: '.header-auth__enter, [class*="auth"] button, text=Log in'
-  username: "#username"
-  password: "#username-password"
-  submit: 'button:has-text("Log in"), .auth-button'
+  # `input#` on purpose, not `#username`: the field id is duplicated on a Vue wrapper <div>
+  # that also carries id="username", and a bare `#username` resolves to the div first, so
+  # fill throws "not an <input>" and every unattended sign-in fell through to the window.
+  username: "input#username"
+  password: "input#username-password"
+  # The form's own submit, not the header dropdown-trigger which also reads "Log in": the
+  # real one is the accent, full-width button (the 1xBet class is there too, first).
+  submit: ".auth-form-fields__submit, .ui-button--theme-accent.ui-button--block"
   # Proof we are in: the deposit button only renders for a logged-in user.
   success: '.user-control-dashboard-payment, a[href*="/office/recharge"]'
   challenge:

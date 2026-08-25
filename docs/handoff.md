@@ -48,9 +48,13 @@ look like a network failure. Clear them by matching `Temp\playwright` in the com
 Portal → **Fetches** → *Fetch accounts now*, or on a schedule. One fetch:
 
 1. **Signs in.** Checks the saved session by loading the page the fetch actually needs — not
-   the shell around it, which a dead session is still served. If dead, tries an unattended
-   login with credentials from `.env`, and only opens a visible window when the site answers
-   with a CAPTCHA or 2FA. Both sites challenge nearly every sign-in, so expect the window.
+   the shell around it, which a dead session is still served. If dead, an unattended login
+   fills the credentials from `.env` and submits — headless, no window. Verified 2026-08-25:
+   neither site shows a CAPTCHA, so this succeeds on its own and the assisted window stays
+   shut; it opens only if the site ever does answer with a real CAPTCHA. The fix that made
+   this work was the login selectors: the field id is duplicated on a wrapper `<div>`, so
+   `input#username` (not `#username`, which grabbed the div and threw), and the form's own
+   accent submit, not the header dropdown-trigger that also reads "Log in".
 2. **Walks every probe inside one loaded panel** — the panel takes 10–13s to start and every
    probe needs the same one, so it is opened once. Between probes the modal is closed and
    *proven* closed (`reset:` in the yaml); anything less reloads.

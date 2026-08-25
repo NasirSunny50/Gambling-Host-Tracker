@@ -22,22 +22,24 @@ urls:
 # GHT_LOGIN_MELBET_BD_USERNAME / _PASSWORD.
 auth_state: data/auth/melbet-bd.json
 
-# Verified against the live login page on 2026-08-23: the form is the same markup 1xBet
-# serves - #username, #username-password, and a "LOG IN" button.
+# Same engine as 1xBet, and the same login-selector fix applies (verified live 2026-08-25:
+# headless sign-in succeeds, no CAPTCHA, no window). The form renders on /user/login on its
+# own - slower here, the mirror lags - so no "open" click; `input#` targets the real input
+# past the duplicate-id wrapper div; the submit is the accent full-width button, not the
+# header dropdown-trigger that also says "Log in".
 login:
   url: https://melbet-76956.bar/en/user/login
-  open: '.auth-dropdown-trigger, .header-auth__enter, text=Log in'
-  username: "#username"
-  password: "#username-password"
-  submit: 'button:has-text("Log in"), .auth-button'
+  username: "input#username"
+  password: "input#username-password"
+  submit: ".auth-form-fields__submit, .ui-button--theme-accent.ui-button--block"
   # Proof we are in: the deposit button only renders for a logged-in user.
   success: '.user-control-dashboard-payment, a[href*="/office/recharge"]'
   challenge:
     - 'iframe[src*="captcha"]'
     - 'iframe[src*="challenge"]'
     - 'text=/verification|captcha|not a robot/i'
-  # Assisted, for the same reason as 1xBet: the brand shows a CAPTCHA on sign-in, and that
-  # is never worked around - a person clears it in the window the run opens.
+  # Kept as a safety net only: with the selectors above the unattended sign-in succeeds, so
+  # the window stays shut. It opens solely if the site ever does answer with a real CAPTCHA.
   assisted: true
 
 # The payment panel is a separate app embedded in the account page; the flow clicks and the
