@@ -55,12 +55,15 @@ def test_the_report_names_the_filters_behind_it():
     assert "Filtered to run #48, Nagad" in text
 
 
-def test_it_states_who_took_it_and_how_many_rows():
+def test_it_states_how_many_rows_but_not_the_address_that_asked():
+    """The count is the reader's check that they have the whole set. The requester's IP is
+    not printed: a loopback address names nobody, and the access log is where who-exported-
+    what is actually answerable."""
     pdf = build_pdf([row(), row()], scope="All payees, all sites", actor="10.0.0.9",
                     channel_labels=LABELS)
     _, text = read(pdf)
-    assert "10.0.0.9" in text
     assert "2 payees in this report" in text
+    assert "10.0.0.9" not in text
 
 
 def test_a_name_only_payee_appears_with_no_number():

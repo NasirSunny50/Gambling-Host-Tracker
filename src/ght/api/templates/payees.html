@@ -7,13 +7,22 @@
 
 {# Short alias: `pagination` describes the slice being shown. #}
 {% set p = pagination %}
-{% set filtered = q or channel or run %}
+{% set filtered = q or channel or run or site %}
 
+{# `run` is a list: a fetch over every site writes one run row per site, and "what did
+   that fetch bring back" is all of them. With one row the banner can name its site and
+   outcome; with several it names the fetch, because no single one of them is the fetch. #}
 {% if run_row %}
 <div class="run-filter">
   <span class="lead">Showing what fetch #{{ run_row.id }} brought back</span>
   <span class="dim">{{ run_site.slug if run_site else "" }} &middot; {{ run_row.started_at | stamp }}</span>
   {{ ui.outcome_pill(run_row.status) }}
+  <a class="btn" href="/payees">Show all payees</a>
+</div>
+{% elif run_rows %}
+<div class="run-filter">
+  <span class="lead">Showing what one fetch brought back, across {{ run_rows | length }} sites</span>
+  <span class="dim">{{ run_rows[0].started_at | stamp }}</span>
   <a class="btn" href="/payees">Show all payees</a>
 </div>
 {% endif %}
@@ -31,9 +40,20 @@
       <option value="{{ c }}" {{ "selected" if c == channel }}>{{ ui.CHANNEL_LABELS.get(c, c) }}</option>
     {% endfor %}
   </select>
+  {# The list runs both brands together, and "which of these is 1xBet publishing?" had no
+     answer short of reading the Site column row by row. It sits beside the channel filter
+     because it is the same kind of question about the same list. #}
+  <select name="site" onchange="this.form.submit()" aria-label="Site">
+    <option value="">All sites</option>
+    {% for s in sites %}
+      <option value="{{ s }}" {{ "selected" if s == site }}>{{ s }}</option>
+    {% endfor %}
+  </select>
   <input type="hidden" name="per" value="{{ per }}">
-  {% if run %}<input type="hidden" name="run" value="{{ run }}">{% endif %}
-  {% set filters = "channel=" ~ (channel or '') ~ "&q=" ~ q ~ ("&run=" ~ run if run else "") %}
+  {% for id in run %}<input type="hidden" name="run" value="{{ id }}">{% endfor %}
+  {# Repeated once per run, because that is how the route reads several of them. #}
+  {% set run_qs = ("&run=" ~ run | join("&run=")) if run else "" %}
+  {% set filters = "channel=" ~ (channel or '') ~ "&q=" ~ q ~ ("&site=" ~ site if site else "") ~ run_qs %}
   <a class="btn" href="/accounts.csv?{{ filters }}" title="Every column, for a spreadsheet">
     {{ ui.file_icon("csv") }} CSV</a>
   <a class="btn" href="/payees.pdf?{{ filters }}" title="A report to file or hand on">
@@ -58,7 +78,10 @@
     </tr>
     {% endfor %}
   {% endcall %}
-  {{ ui.pager(p, "/payees", {"q": q, "channel": channel or "", "run": run or "", "per": per},
+  {# The pager writes one `key=value` per entry, so several runs go in pre-joined - paging
+     a fetch's list must not quietly drop half the fetch. #}
+  {{ ui.pager(p, "/payees", {"q": q, "channel": channel or "", "site": site or "",
+                            "run": run | join("&run="), "per": per},
               page_sizes=page_sizes, per=per, noun="payees" ~ (" (filtered)" if filtered else "")) }}
 </div>
 {% elif run_row %}

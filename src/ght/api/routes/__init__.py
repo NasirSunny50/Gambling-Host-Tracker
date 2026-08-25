@@ -16,7 +16,7 @@ from math import ceil
 from pathlib import Path
 from urllib.parse import urlparse
 
-from fastapi import APIRouter, Depends, Form, Request, Response
+from fastapi import APIRouter, Depends, Form, Query, Request, Response
 from fastapi.responses import (
     FileResponse,
     HTMLResponse,
@@ -398,13 +398,24 @@ def _accounts_from_run(run_id: int):
     times" is the whole point of it. The question here is narrower - which of them did
     *this* run bring in - and only the sightings know that.
     """
-    return select(Observation.account_id).where(Observation.run_id == run_id)
+    return select(Observation.account_id).where(Observation.run_id.in_(_run_ids(run_id)))
 
 
-def _account_query(channel: str | None, q: str | None, run: int | None = None):
+def _run_ids(run) -> list[int]:
+    """One run or several, as a list. An "all sites" fetch writes one row per site, so the
+    question "what did that fetch bring back" is answered by all of its rows at once."""
+    if run is None:
+        return []
+    return list(run) if isinstance(run, (list, tuple, set)) else [run]
+
+
+def _account_query(channel: str | None, q: str | None, run: int | None = None,
+                   site: str | None = None):
     stmt = select(Account)
     if run:
         stmt = stmt.where(Account.id.in_(_accounts_from_run(run)))
+    if site:
+        stmt = stmt.where(Account.id.in_(_on_site(site)))
     if channel:
         stmt = stmt.where(Account.channel == channel)
     if q:
@@ -417,7 +428,17 @@ def _account_query(channel: str | None, q: str | None, run: int | None = None):
     return stmt
 
 
-def _payee_query(channel: str | None, q: str | None, run: int | None = None):
+def _on_site(slug: str):
+    """Accounts linked to one site, as a subquery to test membership against."""
+    return (
+        select(AccountSite.account_id)
+        .join(Site, Site.id == AccountSite.site_id)
+        .where(Site.slug == slug)
+    )
+
+
+def _payee_query(channel: str | None, q: str | None, run: int | None = None,
+                 site: str | None = None):
     """Accounts and name-only merchants as one list, newest sighting first.
 
     They are different things — an account is a de-duplicated identity with a number and a
@@ -454,6 +475,12 @@ def _payee_query(channel: str | None, q: str | None, run: int | None = None):
     )
     if run:
         accounts = accounts.where(Account.id.in_(_accounts_from_run(run)))
+    # Membership, not the "site" column above: that column shows the *most recent* brand an
+    # account was seen on, and filtering on it would hide an account from 1xBet's list
+    # because Melbet happened to publish it more recently. The same account on both brands
+    # belongs in both lists - that overlap is the strongest finding this data produces.
+    if site:
+        accounts = accounts.where(Account.id.in_(_on_site(site)))
     if channel:
         accounts = accounts.where(Account.channel == channel)
     if q:
@@ -485,7 +512,9 @@ def _payee_query(channel: str | None, q: str | None, run: int | None = None):
         .group_by(MerchantSighting.merchant_name, MerchantSighting.channel)
     )
     if run:
-        merchants = merchants.where(MerchantSighting.run_id == run)
+        merchants = merchants.where(MerchantSighting.run_id.in_(_run_ids(run)))
+    if site:
+        merchants = merchants.where(Site.slug == site)
     if channel:
         merchants = merchants.where(MerchantSighting.channel == channel)
     if q:
@@ -504,20 +533,27 @@ def payees(
     request: Request,
     channel: str | None = None,
     q: str | None = None,
-    run: int | None = None,
+    run: list[int] | None = Query(None),
+    site: str | None = None,
     page: int = 1,
     per: int = PAGE_SIZE,
     session: Session = Depends(get_session),
 ):
-    """One list of every payee the fetcher has brought back."""
+    """One list of every payee the fetcher has brought back.
+
+    ``run`` may be given more than once. A fetch over "all sites" writes one run row per
+    site, and "what did that fetch bring back" means all of them - a link carrying only the
+    last site's id showed a fraction of the payees the outcome card had just counted.
+    """
+    run = _run_ids(run)
     per_page = per if per in PAGE_SIZES else PAGE_SIZE
-    stmt = _payee_query(channel, q, run)
+    stmt = _payee_query(channel, q, run, site)
     rows, page_info = _paginate(session, stmt, page, per_page=per_page, scalar=False)
     _log(
         session,
         request,
         "search",
-        {"channel": channel, "q": q, "run": run, "page": page_info.number},
+        {"channel": channel, "q": q, "run": run, "site": site, "page": page_info.number},
         page_info.total,
     )
 
@@ -527,7 +563,10 @@ def payees(
     )
     # Filtering to a run is the one filter that is not a control on this page - it arrives
     # from the run that just finished - so the page has to say whose list this is.
-    run_row = session.get(CollectionRun, run) if run else None
+    # One run named: the page says whose list this is. Several: it names the fetch that
+    # covered them rather than picking one of its sites to speak for the rest.
+    run_rows = [r for r in (session.get(CollectionRun, i) for i in run) if r is not None]
+    run_row = run_rows[0] if len(run_rows) == 1 else None
     return templates.TemplateResponse(
         request,
         "payees.html",
@@ -539,8 +578,18 @@ def payees(
             "channel": channel,
             "q": q or "",
             "run": run,
+            "run_rows": run_rows,
             "run_row": run_row,
             "run_site": sites_by_id(session).get(run_row.site_id) if run_row else None,
+            # Every site with payees on it, not every configured site: a filter that offers
+            # a choice returning nothing is a filter that wastes the reader's click.
+            "sites": session.scalars(
+                select(Site.slug)
+                .join(AccountSite, AccountSite.site_id == Site.id)
+                .distinct()
+                .order_by(Site.slug)
+            ).all(),
+            "site": site,
             "per": per_page,
             "page_sizes": PAGE_SIZES,
         },
@@ -896,17 +945,10 @@ def runs(
     if waiting:
         phases = [{**p, "state": "waiting" if p["state"] == "active" else p["state"]} for p in phases]
 
-    # The run row the finished summary describes: the newest one for that site. Read from
-    # the database rather than from the rows on screen - the history is paged now, and an
-    # operator reading page three has just as much right to the card as one on page one.
-    last_run = None
-    if finished:
-        newest = select(CollectionRun).order_by(CollectionRun.started_at.desc()).limit(1)
-        if finished.slug != ALL_SITES:
-            newest = newest.join(Site, Site.id == CollectionRun.site_id).where(
-                Site.slug == finished.slug
-            )
-        last_run = session.scalar(newest)
+    # What the finished card describes. Read from the database rather than from the rows on
+    # screen - the history is paged now, and an operator reading page three has just as much
+    # right to the card as one on page one.
+    outcome = _fetch_outcome(session, finished) if finished else None
 
     return templates.TemplateResponse(
         request,
@@ -930,7 +972,7 @@ def runs(
             "run_source": getattr(shown, "source", "manual") if shown else "manual",
             "elapsed": _elapsed(shown) if shown else "",
             "finished": finished,
-            "last_run": last_run,
+            "outcome": outcome,
             "schedule": scheduler.state,
             "schedule_seconds": scheduler.seconds_until_next,
             "schedule_per_day": scheduler.runs_per_day,
@@ -939,6 +981,87 @@ def runs(
             # without the analyst hammering refresh.
             "auto_refresh": manager.is_running,
         },
+    )
+
+
+# Worst first. A fetch over several sites is only as good as its weakest site: reporting
+# "ok" because the last one happened to succeed is how a failed site goes unnoticed.
+_STATUS_RANK = {"failed": 3, "blocked": 2, "partial": 1, "ok": 0}
+
+
+@dataclass(frozen=True)
+class FetchOutcome:
+    """Every run row one fetch wrote, read as one result.
+
+    A fetch pointed at "all sites" walks the sites one after another and writes a row per
+    site. The card used to describe whichever row was newest, so a two-site fetch reported
+    the second site's payee count as the fetch's own - 11 where 18 were collected - and
+    named only that site's problems. Nothing about the numbers was wrong; they were
+    answers to a narrower question than the card was asking.
+    """
+
+    runs: tuple
+    slugs: tuple
+
+    @property
+    def ids(self) -> list[int]:
+        return [r.id for r in self.runs]
+
+    @property
+    def candidates_found(self) -> int:
+        return sum(r.candidates_found or 0 for r in self.runs)
+
+    @property
+    def accounts_new(self) -> int:
+        return sum(r.accounts_new or 0 for r in self.runs)
+
+    @property
+    def status(self) -> str:
+        return max((r.status for r in self.runs), key=lambda s: _STATUS_RANK.get(s, 1),
+                   default="ok")
+
+    @property
+    def error(self) -> str:
+        """Every site's note, each said in front of the site it belongs to.
+
+        With one site the slug would be repeating the heading, so it is left off. With
+        several it is the whole point - "3 methods could not be read" is unactionable
+        until you know which site could not read them.
+        """
+        notes = [(slug, run.error) for slug, run in zip(self.slugs, self.runs) if run.error]
+        if not notes:
+            return ""
+        if len(self.runs) == 1:
+            return notes[0][1]
+        return " · ".join(f"{slug}: {error}" for slug, error in notes)
+
+
+def _fetch_outcome(session: Session, finished) -> FetchOutcome | None:
+    """The run rows one finished fetch wrote.
+
+    Found by start time, which is sound because only one fetch runs machine-wide - the
+    collector holds ``data/run.lock`` - so nothing else can have written a row since this
+    fetch began. A few seconds of slack absorbs the gap between the portal starting the
+    job and the collector stamping its first row.
+    """
+    since = finished.started_at
+    if since.tzinfo is not None:
+        since = since.astimezone(UTC).replace(tzinfo=None)
+    rows = session.scalars(
+        select(CollectionRun)
+        .where(CollectionRun.started_at >= since - timedelta(seconds=5))
+        .order_by(CollectionRun.started_at)
+    ).all()
+    if finished.slug != ALL_SITES:
+        slugs = sites_by_id(session)
+        rows = [r for r in rows if getattr(slugs.get(r.site_id), "slug", "") == finished.slug]
+        rows = rows[-1:]
+    if not rows:
+        return None
+    by_id = sites_by_id(session)
+    return FetchOutcome(
+        runs=tuple(rows),
+        slugs=tuple(getattr(by_id.get(r.site_id), "slug", str(r.site_id)) for r in rows),
     )
 
 
@@ -1095,7 +1218,8 @@ def stop_schedule(request: Request, session: Session = Depends(get_session)):
     return RedirectResponse("/runs", status_code=303)
 
 
-def _merchant_rows(channel: str | None, q: str | None, run: int | None):
+def _merchant_rows(channel: str | None, q: str | None, run: int | None,
+                   site: str | None = None):
     """Name-only payees, grouped the way the Payees table groups them."""
     stmt = (
         select(
@@ -1110,7 +1234,9 @@ def _merchant_rows(channel: str | None, q: str | None, run: int | None):
         .order_by(MerchantSighting.channel)
     )
     if run:
-        stmt = stmt.where(MerchantSighting.run_id == run)
+        stmt = stmt.where(MerchantSighting.run_id.in_(_run_ids(run)))
+    if site:
+        stmt = stmt.where(Site.slug == site)
     if channel:
         stmt = stmt.where(MerchantSighting.channel == channel)
     if q:
@@ -1124,6 +1250,7 @@ def payees_pdf(
     channel: str | None = None,
     q: str | None = None,
     run: int | None = None,
+    site: str | None = None,
     session: Session = Depends(get_session),
 ):
     """The same payees as a document rather than a data file.
@@ -1132,11 +1259,11 @@ def payees_pdf(
     case. So it carries the things a loose printed page needs to still mean something: what
     it is a report of, when it was taken, by whom, and a page number on every sheet.
     """
-    rows = [dict(r._mapping) for r in session.execute(_payee_query(channel, q, run))]
+    rows = [dict(r._mapping) for r in session.execute(_payee_query(channel, q, run, site))]
     run_row = session.get(CollectionRun, run) if run else None
-    scope = _describe_scope(channel, q, run_row)
-    _log(session, request, "export", {"format": "pdf", "channel": channel, "q": q, "run": run},
-         len(rows))
+    scope = _describe_scope(channel, q, run_row, site)
+    _log(session, request, "export",
+         {"format": "pdf", "channel": channel, "q": q, "run": run, "site": site}, len(rows))
 
     try:
         from ght.export.report import build_pdf
@@ -1156,7 +1283,7 @@ def payees_pdf(
     )
 
 
-def _describe_scope(channel: str | None, q: str | None, run_row) -> str:
+def _describe_scope(channel: str | None, q: str | None, run_row, site: str | None = None) -> str:
     """The filters behind a report, named the way the page names them.
 
     Each filter says which control it came from - Channel, Search, Fetch - rather than
@@ -1167,6 +1294,8 @@ def _describe_scope(channel: str | None, q: str | None, run_row) -> str:
     parts = []
     if run_row is not None:
         parts.append(f"Fetch #{run_row.id}")
+    if site:
+        parts.append(f"Site: {site}")
     if channel:
         parts.append(f"Channel: {CHANNEL_LABELS.get(channel, channel)}")
     if q:
@@ -1180,6 +1309,7 @@ def accounts_csv(
     channel: str | None = None,
     q: str | None = None,
     run: int | None = None,
+    site: str | None = None,
     session: Session = Depends(get_session),
 ):
     """The same rows the table is showing, as a file the AML team can hand on.
@@ -1189,13 +1319,15 @@ def accounts_csv(
     disagreed with the screen it was downloaded from — and the names are the whole of what
     is collectable from the methods that publish no wallet.
     """
-    rows = session.scalars(_account_query(channel, q, run).order_by(Account.channel)).all()
-    merchants = session.execute(_merchant_rows(channel, q, run)).all()
+    rows = session.scalars(
+        _account_query(channel, q, run, site).order_by(Account.channel)
+    ).all()
+    merchants = session.execute(_merchant_rows(channel, q, run, site)).all()
     _log(
         session,
         request,
         "export",
-        {"channel": channel, "q": q, "run": run},
+        {"channel": channel, "q": q, "run": run, "site": site},
         len(rows) + len(merchants),
     )
 

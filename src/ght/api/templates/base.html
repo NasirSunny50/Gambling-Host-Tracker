@@ -457,15 +457,25 @@
     paintThemeLabel();
     // The header clock is rendered server-side and then kept live, so a page left open
     // overnight does not quietly go on claiming it is still yesterday.
+    //
+    // It writes the same shape the server wrote and every timestamp on every page uses:
+    // dd/mm/yyyy with a 12-hour time, at +06:00. It used to overwrite the server's stamp
+    // with an ISO date in the browser's own zone, so ten seconds after a page loaded the
+    // header disagreed with the table under it about both the format and the hour.
     (function () {
       var el = document.getElementById("clock");
       if (!el) return;
       function pad(n) { return String(n).padStart(2, "0"); }
-      setInterval(function () {
-        var d = new Date();
-        el.textContent = d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()) +
-                         " " + pad(d.getHours()) + ":" + pad(d.getMinutes());
-      }, 10000);
+      function dhaka() {
+        // Bangladesh keeps one offset all year, so the arithmetic needs no tz database -
+        // and reading it off UTC means a machine set to another zone still shows Dhaka.
+        var d = new Date(Date.now() + 6 * 3600 * 1000);
+        var hours = d.getUTCHours();
+        var meridiem = hours < 12 ? "AM" : "PM";
+        return pad(d.getUTCDate()) + "/" + pad(d.getUTCMonth() + 1) + "/" + d.getUTCFullYear() +
+               " " + pad(hours % 12 || 12) + ":" + pad(d.getUTCMinutes()) + " " + meridiem;
+      }
+      setInterval(function () { el.textContent = dhaka(); }, 10000);
     })();
     // Anything carrying data-copy copies it. The value stays an attribute rather than
     // being pasted into an onclick, so a quote in a collected merchant name cannot break

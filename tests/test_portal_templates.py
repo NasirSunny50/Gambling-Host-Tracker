@@ -69,6 +69,13 @@ def run_row(**kw):
     return SimpleNamespace(**{**fields, **kw})
 
 
+def outcome(*runs, slugs=None):
+    """The run rows one fetch wrote, summed the way the route sums them."""
+    from ght.api.routes import FetchOutcome
+
+    return FetchOutcome(runs=tuple(runs), slugs=tuple(slugs or ["demo-site"] * len(runs)))
+
+
 def payee_row(**kw):
     fields = {
         "id": 1,
@@ -421,7 +428,7 @@ RUNS_BASE = {
     "evidence_counts": {7: 16},
     "runnable": [{"slug": "demo-site", "name": "Demo Site", "status": "active"}],
     "job_log": [],
-    "last_run": None,
+    "outcome": None,
     "elapsed": "1m 30s",
 }
 
@@ -511,12 +518,40 @@ def test_a_finished_run_summarises_what_it_collected():
         waiting=False,
         seconds_left=None,
         phases=phases(["done", "done", "done"]),
-        **{**RUNS_BASE, "last_run": run_row(status="partial")},
+        **{**RUNS_BASE, "outcome": outcome(run_row(status="partial"))},
     )
     assert "Fetch finished" in html
     assert "partial" in html
     # The link after a run asks what *this* run brought in, not what has ever been collected.
     assert 'href="/payees?run=7"' in html
+
+
+def test_an_all_sites_fetch_reports_the_whole_fetch_not_its_last_site():
+    """A fetch over both sites writes a run row per site. The card described whichever row
+    was newest, so it reported one site's payee count as the fetch's own and named only
+    that site's problems - and the link under it opened that site's share of the list."""
+    html = render(
+        "runs.html",
+        finished=in_flight(finished_at=NOW, returncode=0, message="Finished", slug="all"),
+        job_running=False,
+        waiting=False,
+        seconds_left=None,
+        phases=phases(["done", "done", "done"]),
+        **{**RUNS_BASE, "outcome": outcome(
+            run_row(id=246, status="partial", candidates_found=7, accounts_new=1,
+                    error="1 method could not be read (lightspeed-bkash)"),
+            run_row(id=247, status="partial", candidates_found=11, accounts_new=2,
+                    error="3 methods could not be read (bank-ucb)"),
+            slugs=("1xbet-bd", "melbet-bd"),
+        )},
+    )
+    assert ">18<" in html                       # 7 + 11, not 11
+    assert ">3<" in html                        # 1 + 2 new
+    # Every site's note, each said in front of the site it belongs to.
+    assert "1xbet-bd: 1 method could not be read" in html
+    assert "melbet-bd: 3 methods could not be read" in html
+    # And the list it links to is the whole fetch, so it adds up to the tile above it.
+    assert 'href="/payees?run=246&amp;run=247"' in html
 
 
 @pytest.mark.parametrize("name", ["components.html"])
@@ -536,8 +571,9 @@ def test_a_failed_run_is_not_dressed_up_as_a_finished_one():
         waiting=False,
         seconds_left=None,
         phases=phases(["stopped", "pending", "pending"]),
-        **{**RUNS_BASE, "last_run": run_row(status="failed", candidates_found=0, accounts_new=0,
-                                            error="Login session expired and sign-in did not recover it")},
+        **{**RUNS_BASE, "outcome": outcome(
+            run_row(status="failed", candidates_found=0, accounts_new=0,
+                    error="Login session expired and sign-in did not recover it"))},
     )
     assert "Fetch stopped" in html
     assert "Run finished" not in html

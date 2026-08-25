@@ -157,8 +157,12 @@ recurring UI elements and the reasoning (not linked in the nav).
   because it is the column that changes least. The list is the configs on disk; the
   database only supplies the counts, so a site collected once and retired keeps its rows
   without still being a target.
-- **Payees** — one list of both kinds. Search + channel filter, per-page, CSV and PDF export.
-  Copy icons sit on the number and on the holder name.
+- **Payees** — one list of both kinds. Search + **channel and site filters**, per-page, CSV
+  and PDF export (both carry the filters, so an export matches the screen it came from).
+  The site filter tests *membership* (`_on_site`), not the Site column — that column shows
+  the most recent brand an account was seen on, and filtering on it would hide an account
+  from 1xBet's list because Melbet published it more recently. Copy icons sit on the number
+  and on the holder name.
 - **Payee detail** — the identity (including **Found on**, the site that published it —
   the first thing asked of a number bound for a blocklist, so it sits with the identity
   rather than in a panel further down), the sightings, and one screenshot **of the panel that
@@ -174,6 +178,13 @@ recurring UI elements and the reasoning (not linked in the nav).
   leaving a blank column, and after a manual fetch ends its outcome and the button sit
   together. The cards are headings only — "Fetch now" and "Fetch on a schedule" — the
   explanatory paragraphs were cut. The outcome card shows once and stands down on reload.
+  **The outcome card describes the whole fetch, not its last site** (`FetchOutcome` /
+  `_fetch_outcome`). An "all sites" fetch writes one `collection_runs` row per site; the
+  card used to read whichever row was newest, so a two-site fetch reported 11 payees where
+  18 were collected and named only that site's problems. It now sums the counts, takes the
+  worst status, prefixes each site's note with its slug, and links to `/payees?run=&run=`
+  — `run` may repeat, and `_run_ids` folds one or many into an `IN`. The rows are found by
+  start time, which is sound because `data/run.lock` means only one fetch runs machine-wide.
   A row opens `/runs/<id>`: when it went, how long it took, and what it brought back, with
   the payees **never seen before marked on their own rows**. Evidence is still captured and
   hashed but is not surfaced here.
@@ -186,7 +197,10 @@ recurring UI elements and the reasoning (not linked in the nav).
 heading; a sentence that never changes stops being read after the second visit, so the
 header is the heading alone. Don't add them back.
 
-Dates are Bangladesh format and +06:00 everywhere (`_stamp` / `_day` in `api/routes`).
+Dates are Bangladesh format and +06:00 everywhere (`_stamp` / `_day` in `api/routes`) —
+**including the live header clock**, which used to overwrite the server's stamp with an ISO
+date in the browser's own zone ten seconds after load. It reads Dhaka off UTC, so a machine
+set to another zone still shows the same hour the tables below it show.
 
 **The PDF report** (`export/report.py`) is set for a page that gets printed and photocopied:
 9.5pt body, 22pt rows, and a 12pt `GUTTER` that every column's width includes, so widening
@@ -194,7 +208,10 @@ a column widens the gap with it. Bank and Last seen are sized to hold their long
 value uncut — a bank name abbreviated by the page is indistinguishable from one the site
 abbreviated, and a cut timestamp is not evidence. The header names the filters behind the
 report on their own labelled line (`_describe_scope`, worded the way the page's controls
-are); the footer is the product, who exported it, and the page number, and nothing else.
+are); the footer is the product and the page number, and nothing else — the requester's IP
+is not printed (a loopback address names nobody; the access log is where who-exported-what
+is answerable), though `build_pdf` still requires `actor` so a caller cannot export without
+identifying the requester to that log.
 
 ## The schedule
 

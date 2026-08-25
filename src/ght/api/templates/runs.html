@@ -160,10 +160,12 @@
 {% elif finished %}
   {# Shown once, on the load that follows the run ending. A reload stands it down — the
      run is in the history table below either way. #}
-  {% set failed = finished.failed or (last_run and last_run.status in ("failed", "blocked")) %}
+  {# `outcome` is every run row this fetch wrote, summed. An "all sites" fetch writes one
+     per site, and the card describes the fetch - not whichever site finished last. #}
+  {% set failed = finished.failed or (outcome and outcome.status in ("failed", "blocked")) %}
     <section class="panel run-card">
       <div class="run-head">
-        {% if last_run %}{{ ui.outcome_pill(last_run.status) }}
+        {% if outcome %}{{ ui.outcome_pill(outcome.status) }}
         {% else %}{{ ui.outcome_pill("failed" if failed else "ok") }}{% endif %}
         <h2 class="run-title">
           {{ "Fetch stopped" if failed else "Fetch finished" }} &middot;
@@ -176,23 +178,26 @@
       {# A run that saw less than everything says so here, in one line, whether or not
          anything was broken. A colour with no explanation is what sent the operator
          hunting for a fault that was the site's own doing. #}
-      {% set why = (last_run.error if last_run and last_run.error else (finished.message if failed else None)) %}
+      {% set why = (outcome.error if outcome and outcome.error else (finished.message if failed else None)) %}
       {% if why %}
-      <div class="callout {{ 'warn' if failed or (last_run and last_run.status == 'partial') else 'info' }}">
+      <div class="callout {{ 'warn' if failed or (outcome and outcome.status == 'partial') else 'info' }}">
         <span class="lead" aria-hidden="true">{{ "&#9888;" | safe if failed else "&#9432;" | safe }}</span>
         <span>{{ why }}</span>
       </div>
       {% endif %}
       {{ ui.phases(phases) }}
-      {% if last_run %}
+      {% if outcome %}
       <div class="tiles">
-        <div class="tile"><div class="tile-n mono">{{ last_run.candidates_found }}</div><div class="tile-k">payees found</div></div>
-        <div class="tile"><div class="tile-n mono" style="{{ 'color:var(--ok)' if last_run.accounts_new }}">{{ last_run.accounts_new }}</div><div class="tile-k">new accounts</div></div>
+        <div class="tile"><div class="tile-n mono">{{ outcome.candidates_found }}</div><div class="tile-k">payees found</div></div>
+        <div class="tile"><div class="tile-n mono" style="{{ 'color:var(--ok)' if outcome.accounts_new }}">{{ outcome.accounts_new }}</div><div class="tile-k">new accounts</div></div>
       </div>
-      {% if last_run.candidates_found %}
-        {# Filtered to this run, not the whole list: the question after a run is what *it*
-           brought in, and the answer is uninterpretable next to everything ever fetched. #}
-        <a class="btn btn-primary" href="/payees?run={{ last_run.id }}">View what this fetch brought back &rarr;</a>
+      {% if outcome.candidates_found %}
+        {# Filtered to this fetch, not the whole list: the question after a fetch is what
+           *it* brought in, and the answer is uninterpretable next to everything ever
+           fetched. Every one of its runs is named, so the list adds up to the tile above
+           it rather than showing one site's share of it. #}
+        <a class="btn btn-primary"
+           href="/payees?{% for id in outcome.ids %}{{ "&" if not loop.first }}run={{ id }}{% endfor %}">View what this fetch brought back &rarr;</a>
       {% endif %}
       {% endif %}
       {% if job_log %}<div class="logbox">{% for line in job_log %}{{ line }}

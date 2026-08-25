@@ -190,11 +190,12 @@ class _Report:
         c.line(left, h - 72, right, h - 72)
 
     def footer(self) -> None:
-        """The product, who exported it, and which page this is. Nothing else.
+        """The product and which page this is. Nothing else.
 
-        It used to carry a sentence about the retention policy on every page. A line
-        repeated on every sheet of a document stops being read on the second sheet, and
-        the policy is not something a payee list is the right place to assert.
+        It used to carry a sentence about the retention policy on every page, and the IP
+        the export was requested from. A line repeated on every sheet stops being read on
+        the second sheet, and a loopback address identifies nobody - the access log keeps
+        the real record of who exported what, where it can be queried.
         """
         c, w = self.c, self.width
         left, right = self.PAGE_MARGIN, w - self.PAGE_MARGIN
@@ -207,7 +208,6 @@ class _Report:
         c.setFillColorRGB(*QUIET)
         c.setFont("Helvetica", 8)
         c.drawString(left, y, "Gambling Host Tracker")
-        c.drawCentredString(w / 2, y, self.meta["actor"])
         # Every page says which it is, because pages get separated from their cover sheet.
         c.drawRightString(right, y, f"Page {self.page}")
 
@@ -282,7 +282,12 @@ def build_pdf(rows: list[dict], *, scope: str, actor: str, channel_labels: dict)
     ``rows`` are the same records the Payees table shows. ``scope`` describes the filters
     that produced them, so the document says what it is a report *of* rather than leaving
     the reader to guess whether it is everything.
+
+    ``actor`` is who asked for the export. It is not printed - a loopback address on a
+    page names nobody - but it is still required, so that the caller cannot export without
+    having identified the requester to the access log.
     """
+    _ = actor
     from reportlab.lib.pagesizes import A4, landscape
     from reportlab.pdfgen import canvas as pdfcanvas
 
@@ -299,7 +304,6 @@ def build_pdf(rows: list[dict], *, scope: str, actor: str, channel_labels: dict)
         "generated": f"Generated {now:%d/%m/%Y %I:%M %p}",
         "scope": scope,
         "count": f"{len(rows)} payee{'' if len(rows) == 1 else 's'}",
-        "actor": f"Exported by {actor}",
     }
 
     report = _Report(c, page_size, meta, body_font=_register_body_font())
