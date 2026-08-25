@@ -559,6 +559,33 @@ def test_sites_tracked_follows_the_configs_not_the_database(monkeypatch, tmp_pat
     assert len([s for s in sites if s["slug"] != "all"]) == 2
 
 
+def test_all_survives_a_config_this_process_cannot_parse(monkeypatch, tmp_path):
+    """The portal holds older code in memory, so a config that gained a field this process
+    does not know yet fails to parse here while a fetch's fresh subprocess reads it fine.
+    "All" would still run that site, so it must not vanish from the dropdown just because
+    one file is unparseable right now - it is re-added and counted like any other target."""
+    from pathlib import Path
+
+    from ght.api.routes import _runnable_sites
+    from ght.config import settings
+
+    source = Path("tests/fixtures/demo-site.yaml").read_text(encoding="utf-8")
+    (tmp_path / "one.yaml").write_text(source, encoding="utf-8")
+    # A second file this process cannot validate (an unknown top-level key the strict model
+    # rejects), standing in for a config newer than the running code.
+    (tmp_path / "two.yaml").write_text(
+        source.replace("demo-site", "demo-site-2") + "\nunknown_field_from_the_future: 1\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(settings, "sources_dir", tmp_path)
+
+    sites = _runnable_sites()
+    slugs = [s["slug"] for s in sites]
+    assert slugs[0] == "all"                       # still offered despite the broken file
+    assert "two" in slugs                          # the broken file is re-added by its filename
+    assert sites[0]["name"] == "All sites (2)"     # and counted toward the total
+
+
 def test_a_name_only_payee_has_a_page_and_a_picture():
     """It has no number to copy anywhere, so the screenshot of the checkout that named it
     is the whole of the evidence - and until it had a page, nobody could see it."""

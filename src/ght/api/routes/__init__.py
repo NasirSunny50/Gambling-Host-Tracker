@@ -705,15 +705,6 @@ def _runnable_sites() -> list[dict]:
     fetch drives a real browser and two of them race on the login session.
     """
     configs, broken = scan_sources()
-    active = [c for c in configs if c.status == "active"]
-    everything = [
-        {
-            "slug": ALL_SITES,
-            "name": f"All sites ({len(active)})" if active else "All sites",
-            "status": "active",
-            "fetcher": "",
-        }
-    ] if len(active) > 1 else []
     sites = [
         {
             "slug": config.slug,
@@ -733,6 +724,21 @@ def _runnable_sites() -> list[dict]:
         slug = bad.path.stem
         if slug not in known:
             sites.append({"slug": slug, "name": slug, "status": "active", "fetcher": ""})
+    # "All" is decided *after* the broken files are folded back in, and counted the same way
+    # a fetch would run them. A file that fails to parse in this long-lived process still
+    # parses fine in the fresh subprocess a fetch spawns, so "all" would fetch it - and the
+    # choice must not disappear from the dropdown just because the portal has not been
+    # restarted yet. So the count is every runnable target, not only the ones this process
+    # could parse.
+    active = [s for s in sites if s["status"] == "active"]
+    everything = [
+        {
+            "slug": ALL_SITES,
+            "name": f"All sites ({len(active)})" if active else "All sites",
+            "status": "active",
+            "fetcher": "",
+        }
+    ] if len(active) > 1 else []
     return everything + sites
 
 

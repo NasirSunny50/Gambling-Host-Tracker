@@ -8,6 +8,11 @@ cd /d "%~dp0.."
 call "scripts\internal\_ensure-env.bat"
 if errorlevel 1 ( echo. & pause & exit /b 1 )
 
+REM Stop any portal or collection browser still running from a previous launch, so this
+REM one binds the port cleanly and runs the current code rather than an old copy held in
+REM memory. Safe when nothing is running.
+call "scripts\internal\_stop-portal.bat"
+
 echo.
 echo ============================================================
 echo   Host Tracker
