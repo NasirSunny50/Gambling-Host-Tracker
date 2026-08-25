@@ -314,7 +314,8 @@ def test_several_sites_are_walked_in_turn_and_say_which_one(monkeypatch):
         walked.append(config.slug)
         return SimpleNamespace(
             status="ok", slug=config.slug, error=None, extraction=None,
-            account_count=0, changes=SimpleNamespace(new_account_ids=[], disappeared_account_ids=[]),
+            account_count=0, payee_count=0, name_only_count=0,
+            changes=SimpleNamespace(new_account_ids=[], disappeared_account_ids=[]),
         )
 
     class NullSession:
@@ -352,7 +353,8 @@ def test_one_site_is_not_announced_as_one_of_one(monkeypatch):
     def fake_run_site(session, config, dry_run=False, on_progress=None):
         return SimpleNamespace(
             status="ok", slug=config.slug, error=None, extraction=None,
-            account_count=0, changes=SimpleNamespace(new_account_ids=[], disappeared_account_ids=[]),
+            account_count=0, payee_count=0, name_only_count=0,
+            changes=SimpleNamespace(new_account_ids=[], disappeared_account_ids=[]),
         )
 
     class NullSession:

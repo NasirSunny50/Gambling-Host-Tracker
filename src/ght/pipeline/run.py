@@ -47,6 +47,22 @@ class RunReport:
     def account_count(self) -> int:
         return len(self.extraction.accounts) if self.extraction else 0
 
+    @property
+    def name_only_count(self) -> int:
+        return len(set(self.merchants))
+
+    @property
+    def payee_count(self) -> int:
+        """Every payee this run brought back - the number the portal shows.
+
+        The same expression that is stored on the run row, so the line the CLI prints and
+        the figure the portal counts cannot disagree. They looked as though they did: the
+        console said ``accounts=17`` under a card reading ``19 payees found``, because one
+        was counting numbered accounts and the other was counting payees, and nothing on
+        the screen said so.
+        """
+        return self.account_count + self.name_only_count
+
 
 def sync_site(session: Session, config: SourceConfig) -> Site:
     """Make the DB reflect the YAML config for this site."""
@@ -573,7 +589,7 @@ def run_site(
     # run's own filtered list shows. Two corrections in one line: it counts de-duplicated
     # payees rather than extraction hits, and it counts the name-only ones. A run that
     # collected a Nagad merchant and nothing else was reporting that it had found nothing.
-    run.candidates_found = len(result.accounts) + len(set(report.merchants))
+    run.candidates_found = report.payee_count
 
     if result.extractor_looks_broken:
         run.status = "partial"

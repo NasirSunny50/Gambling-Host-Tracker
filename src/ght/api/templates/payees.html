@@ -34,6 +34,10 @@
     <span class="icon" aria-hidden="true">&#8981;</span>
     <input type="search" name="q" value="{{ q }}" placeholder="Search number, name or bank&hellip;">
   </span>
+  {# Enter still submits, but a text box with no button beside it does not look like it is
+     waiting to be submitted - the selects apply themselves on change, so there was nothing
+     on the toolbar to say that this one does not. #}
+  <button type="submit" class="btn">{{ ui.search_icon() }} Search</button>
   <select name="channel" onchange="this.form.submit()" aria-label="Channel">
     <option value="">All channels</option>
     {% for c in channels %}
@@ -54,6 +58,12 @@
   {# Repeated once per run, because that is how the route reads several of them. #}
   {% set run_qs = ("&run=" ~ run | join("&run=")) if run else "" %}
   {% set filters = "channel=" ~ (channel or '') ~ "&q=" ~ q ~ ("&site=" ~ site if site else "") ~ run_qs %}
+  {# One way out of every filter at once. Clearing them by hand meant emptying the box,
+     submitting, then putting each select back to "All" - three round trips to get back to
+     the list you started from. Shown only when there is something to clear. #}
+  {% if filtered %}
+  <a class="btn btn-clear" href="/payees">Clear filters</a>
+  {% endif %}
   <a class="btn" href="/accounts.csv?{{ filters }}" title="Every column, for a spreadsheet">
     {{ ui.file_icon("csv") }} CSV</a>
   <a class="btn" href="/payees.pdf?{{ filters }}" title="A report to file or hand on">
@@ -111,6 +121,7 @@
 {% endif %}
 
 <style>
+  .btn-clear { color:var(--accent); border-color:var(--accent); }
   /* Eight columns have to fit a laptop without a horizontal scrollbar, and the two free-text
      ones are what push it over. They truncate with the full value on hover. */
   td .clip { max-width:150px; }

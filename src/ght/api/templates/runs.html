@@ -188,7 +188,17 @@
       {{ ui.phases(phases) }}
       {% if outcome %}
       <div class="tiles">
-        <div class="tile"><div class="tile-n mono">{{ outcome.candidates_found }}</div><div class="tile-k">payees found</div></div>
+        <div class="tile">
+          <div class="tile-n mono">{{ outcome.candidates_found }}</div>
+          <div class="tile-k">payees found</div>
+          {# Where the total comes from. A payee is a payee, but one kind has a number and
+             the other is a name at a checkout, and a reader looking at this figure beside
+             a console line counting only the numbered ones cannot otherwise reconcile the
+             two. #}
+          {% if outcome.name_only %}
+          <div class="tile-split">{{ outcome.numbered }} numbered &middot; {{ outcome.name_only }} name-only</div>
+          {% endif %}
+        </div>
         <div class="tile"><div class="tile-n mono" style="{{ 'color:var(--ok)' if outcome.accounts_new }}">{{ outcome.accounts_new }}</div><div class="tile-k">new accounts</div></div>
       </div>
       {% if outcome.candidates_found %}
@@ -278,6 +288,8 @@
   .tile { border:1px solid var(--border); border-radius:9px; padding:12px; }
   .tile-n { font-size:22px; font-weight:750; }
   .tile-k { font-size:12px; color:var(--text-3); }
+  .tile-split { font-size:11.5px; color:var(--text-3); margin-top:5px; padding-top:5px;
+                border-top:1px solid var(--border); }
 
   /* The two ways to fetch, side by side and the same size. Neither is the lesser
      choice, so neither gets the wider column or the higher position. */

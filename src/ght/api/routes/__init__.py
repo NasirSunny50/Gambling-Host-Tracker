@@ -1002,6 +1002,12 @@ class FetchOutcome:
 
     runs: tuple
     slugs: tuple
+    # How the payee total splits. Both halves are payees and both are counted, but one has
+    # a number to put on a blocklist and the other is a name at a checkout - and a reader
+    # who has just been told "19 payees" while the console said "17 accounts" has no way to
+    # reconcile the two unless the page says which is which.
+    numbered: int = 0
+    name_only: int = 0
 
     @property
     def ids(self) -> list[int]:
@@ -1059,9 +1065,20 @@ def _fetch_outcome(session: Session, finished) -> FetchOutcome | None:
     if not rows:
         return None
     by_id = sites_by_id(session)
+    ids = [r.id for r in rows]
+    numbered = session.scalar(
+        select(func.count(func.distinct(Observation.account_id)))
+        .where(Observation.run_id.in_(ids))
+    ) or 0
+    name_only = session.scalar(
+        select(func.count(func.distinct(MerchantSighting.merchant_name)))
+        .where(MerchantSighting.run_id.in_(ids))
+    ) or 0
     return FetchOutcome(
         runs=tuple(rows),
         slugs=tuple(getattr(by_id.get(r.site_id), "slug", str(r.site_id)) for r in rows),
+        numbered=numbered,
+        name_only=name_only,
     )
 
 

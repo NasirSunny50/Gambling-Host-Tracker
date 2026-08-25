@@ -116,7 +116,12 @@
     thead th { background:var(--surface-2); color:var(--text-2); font-size:11px; font-weight:700;
                text-transform:uppercase; letter-spacing:.5px; text-align:left; padding:10px 14px;
                border-bottom:1px solid var(--border); white-space:nowrap; }
-    th.num, td.num { text-align:right; font-variant-numeric:tabular-nums; }
+    /* Every column in every table starts at the same edge. Right-aligned numbers read
+       well in a column of their own, but these tables mix them with names, channels and
+       timestamps, and each right-aligned column left a ragged gap that made the row hard
+       to follow across. The class stays for the tabular figures, which is what actually
+       keeps a column of numbers legible. */
+    th.num, td.num { text-align:left; font-variant-numeric:tabular-nums; }
     tbody td { padding:12px 14px; border-bottom:1px solid var(--border); vertical-align:top; }
     tbody tr:last-child td { border-bottom:none; }
     tbody tr.linked { cursor:pointer; }

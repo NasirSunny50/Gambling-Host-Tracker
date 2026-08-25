@@ -148,6 +148,14 @@
 {# A header may carry its own explanation after a pipe: "Pages saved|what that means".
    A column whose name only makes sense once someone explains it needs the explanation
    attached to it, not left for the reader to ask about. #}
+{# The same glyph the search box carries, so the button reads as belonging to it. #}
+{% macro search_icon() -%}
+<svg class="file-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"
+     stroke-linecap="round" aria-hidden="true">
+  <circle cx="7" cy="7" r="4.4"/><path d="M10.3 10.3 14 14"/>
+</svg>
+{%- endmacro %}
+
 {% macro table(headers) -%}
 <div class="scroll-x"><table>
   <thead><tr>

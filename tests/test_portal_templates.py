@@ -925,3 +925,49 @@ def test_a_site_shows_its_address_not_the_page_we_collect_from():
     assert _base_url("https://bd.1xbet.com/office/recharge?x=1") == "https://bd.1xbet.com"
     assert _base_url("https://melbet-76956.bar") == "https://melbet-76956.bar"
     assert _base_url("") == ""
+
+
+def test_the_payee_total_says_where_it_comes_from():
+    """"19 payees found" over a console line reading "17 accounts" is two totals for the
+    same fetch with nothing on the screen saying which is which. Both are payees; one kind
+    has a number and the other is a name at a checkout."""
+    from ght.api.routes import FetchOutcome
+
+    html = render(
+        "runs.html",
+        finished=in_flight(finished_at=NOW, returncode=0, message="Finished", slug="all"),
+        job_running=False, waiting=False, seconds_left=None,
+        phases=phases(["done", "done", "done"]),
+        **{**RUNS_BASE, "outcome": FetchOutcome(
+            runs=(run_row(id=250, candidates_found=8), run_row(id=251, candidates_found=11)),
+            slugs=("1xbet-bd", "melbet-bd"), numbered=17, name_only=2)},
+    )
+    assert ">19<" in html
+    assert "17 numbered" in html
+    assert "2 name-only" in html
+
+
+def test_a_filtered_payee_list_offers_one_way_out_of_every_filter():
+    """Clearing by hand meant emptying the box, submitting, then putting each select back
+    to "All" — three round trips to get back to the list you started from."""
+    filtered = render("payees.html", rows=[payee_row()], pagination=Page(1, 10, 1),
+                      channels=["bkash"], channel="bkash", q="shoes", run=[], site=None,
+                      sites=["1xbet-bd"], per=10, page_sizes=PAGE_SIZES)
+    assert "Clear filters" in filtered
+    # A search box with no button beside it does not look like it is waiting to be
+    # submitted, when every select on the same toolbar applies itself on change.
+    assert "Search</button>" in filtered
+
+    plain = render("payees.html", rows=[payee_row()], pagination=Page(1, 10, 1),
+                   channels=["bkash"], channel=None, q="", run=[], site=None,
+                   sites=["1xbet-bd"], per=10, page_sizes=PAGE_SIZES)
+    assert "Clear filters" not in plain
+
+
+def test_every_table_column_starts_at_the_same_edge():
+    """Right-aligned counts between left-aligned columns left a ragged gap in the middle of
+    the row, which is where the eye needs a straight edge to follow it across."""
+    from ght.api import TEMPLATES_DIR
+
+    css = (TEMPLATES_DIR / "base.html").read_text(encoding="utf-8")
+    assert "th.num, td.num { text-align:left;" in css

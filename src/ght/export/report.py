@@ -84,7 +84,6 @@ class Column:
     key: str
     label: str
     width: float
-    align: str = "left"
 
 
 # Space between one column's text and the next column's edge. Every width below includes
@@ -104,7 +103,10 @@ COLUMNS = (
     Column("name", "Name", 152),
     Column("bank", "Bank", 152),
     Column("site", "Site", 82),
-    Column("times", "Seen", 40, align="right"),
+    # Left, like every other column here and every column in the portal's tables. A single
+    # right-aligned count between two left-aligned columns left a ragged gap in the middle
+    # of the row, which is exactly where the eye needs a straight edge to follow.
+    Column("times", "Seen", 40),
     Column("last_seen", "Last seen", 136),
 )
 
@@ -228,10 +230,7 @@ class _Report:
         c.setFillColorRGB(*QUIET)
         c.setFont("Helvetica-Bold", self.HEAD_SIZE)
         for col in COLUMNS:
-            if col.align == "right":
-                c.drawRightString(x + col.width - GUTTER, self.y, col.label.upper())
-            else:
-                c.drawString(x, self.y, col.label.upper())
+            c.drawString(x, self.y, col.label.upper())
             x += col.width
         self.y -= self.ROW_HEIGHT
 
@@ -256,10 +255,7 @@ class _Report:
             shown = _latin_safe(str(raw), font) if raw not in (None, "") else "—"
             text = _clip(c, shown, col.width - GUTTER, font, self.BODY_SIZE)
             c.setFont(font, self.BODY_SIZE)
-            if col.align == "right":
-                c.drawRightString(x + col.width - GUTTER, self.y, text)
-            else:
-                c.drawString(x, self.y, text)
+            c.drawString(x, self.y, text)
             x += col.width
 
         c.setStrokeColorRGB(*RULE)

@@ -113,7 +113,12 @@ def _collect(configs, dry_run: bool, on_progress) -> None:
             colour = {"ok": "green", "partial": "yellow"}.get(report.status, "red")
             console.print(
                 f"[{colour}]{report.status:8}[/{colour}] {config.slug:20} "
-                f"accounts={report.account_count} new={len(report.changes.new_account_ids)} "
+                # Payees, broken down, because the portal's card counts payees and this
+                # line used to count only the numbered ones - two different totals for the
+                # same fetch, on the same screen, with nothing saying which was which.
+                f"payees={report.payee_count} ({report.account_count} numbered"
+                f"{f' + {report.name_only_count} name-only' if report.name_only_count else ''}) "
+                f"new={len(report.changes.new_account_ids)} "
                 f"gone={len(report.changes.disappeared_account_ids)}"
                 + (f" error={report.error}" if report.error else "")
             )

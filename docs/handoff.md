@@ -117,7 +117,10 @@ never clicks further, because the click after that one is the confirm.
   detail page exactly like numbered accounts. Anything that counts payees counts both.
 - **`candidates_found`** on a fetch means *payees brought back* (de-duplicated accounts +
   distinct names). Rows written before 2026-08-22 hold raw extraction hits and exclude
-  name-only payees.
+  name-only payees. **This is why the card can read 19 where the console says 17**: both
+  are right, counting different populations. `RunReport.payee_count` is now the single
+  expression behind both, the console line prints the breakdown
+  (`payees=8 (7 numbered + 1 name-only)`), and the outcome card carries it under the tile.
 - **`started_at` before 2026-08-23** was stamped when the row was written, which is after
   collection returns — so older fetches all look instantaneous. Newer ones carry the true
   start.
@@ -157,7 +160,10 @@ recurring UI elements and the reasoning (not linked in the nav).
   because it is the column that changes least. The list is the configs on disk; the
   database only supplies the counts, so a site collected once and retired keeps its rows
   without still being a target.
-- **Payees** — one list of both kinds. Search + **channel and site filters**, per-page, CSV
+- **Payees** — one list of both kinds. Search (with its own button — every select on the
+  toolbar applies itself on change, so a box that waits for Enter needed to say so) and a
+  **Clear filters** button shown only when something is set. Channel and site filters,
+  per-page, CSV
   and PDF export (both carry the filters, so an export matches the screen it came from).
   The site filter tests *membership* (`_on_site`), not the Site column — that column shows
   the most recent brand an account was seen on, and filtering on it would hide an account
@@ -196,6 +202,12 @@ recurring UI elements and the reasoning (not linked in the nav).
 **No page carries a subtitle.** Each one used to explain itself in a line under its
 heading; a sentence that never changes stops being read after the second visit, so the
 header is the heading alone. Don't add them back.
+
+**Every table column is left-aligned**, portal and report alike (`th.num, td.num` in
+`base.html`; no `align` on the report's `Column`). The `num` class stays for tabular
+figures. A right-aligned count between two left-aligned columns left a ragged gap in the
+middle of the row, which is where the eye needs a straight edge to follow it across. The
+one exception is `.kv dd` on the detail pages — a label/value pair block, not a table.
 
 Dates are Bangladesh format and +06:00 everywhere (`_stamp` / `_day` in `api/routes`) —
 **including the live header clock**, which used to overwrite the server's stamp with an ISO
