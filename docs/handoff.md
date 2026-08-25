@@ -191,7 +191,18 @@ retries a refused load `MAX_RETRIES` times, 8s apart; this machine's `.env` is s
 - Nothing sensitive in git: `data/` (sessions, DB, evidence, schedule) and `.env` are
   ignored, and real collected account numbers must not go into code, tests, or comments.
 - Commit and push after each working change, with a message explaining *why*.
-- Two probes reach their payee by confirming a deposit, which initiates a real (unpaid)
-  deposit request on the operator: `fast-nagad` on 1xBet and `nagad-paykassma` on Melbet.
-  Both are marked `creates_order`. **Ask before starting a fetch that includes one** — and
-  note that "All sites" includes both.
+- Some probes reach their payee by confirming a deposit, which initiates a real (unpaid)
+  deposit request on the operator: `fast-nagad` on 1xBet, `nagad-paykassma` on Melbet, and
+  `lightspeed-bkash` on 1xBet (opt-in, see below). All are marked `creates_order`. **Ask
+  before starting a fetch that includes one** — and note that "All sites" includes them, and
+  a schedule fires them unattended every interval (a 15-minute "all" schedule is ~3 orders
+  per cycle — flag that cost to the operator).
+- **`lightspeed-bkash` (1xBet) is opt-in and unverified.** It confirms into a new tab that
+  wants the payer's own bKash number and, on Next, reveals the receiving account (a real
+  number, unlike Fast Nagad which yields only a rotating merchant name). It runs only when
+  `GHT_1XBET_PAYER_MSISDN` (an 11-digit number) is set in `.env` — until then the probe is
+  skipped and raises no order (`requires_env`). Its new-tab selectors are a best guess: the
+  method was off site-side when it was built, so confirm them from the first live capture.
+- **Flow steps can now**: `opens_tab: true` on a click follows the payee into a new browser
+  tab (`fetchers/browser.py` `_click_into_new_tab`); a `fill` value written as `${NAME}` is
+  read from the environment, keeping a phone number out of git.

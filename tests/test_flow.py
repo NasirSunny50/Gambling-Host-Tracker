@@ -1497,3 +1497,159 @@ def test_the_first_option_waits_for_its_value_to_appear_at_all():
     frame = _ChangingValue(settle_after=2, new_text="1897348759696", prev_text="")
     fetcher._await_value_change(frame, ".value", previous=None)
     assert frame._polls > 2
+
+
+# ============================================================ new-tab (popup) flows
+
+
+class _ExpectPage:
+    def __init__(self, page):
+        self._page = page
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+    @property
+    def value(self):
+        return self._page
+
+
+class _FakeContext:
+    """A context that hands back one popup when a click asks for a new page."""
+
+    def __init__(self, popup):
+        self._popup = popup
+
+    def expect_page(self, timeout=None):
+        return _ExpectPage(self._popup)
+
+
+class NewTabPage:
+    """The provider tab a Confirm click opens: a phone input, a Next button, an account."""
+
+    url = "https://provider.example/checkout"
+
+    def __init__(self):
+        self.filled = []
+        self.typed = []
+        self.clicked = []
+
+    def wait_for_load_state(self, state, timeout=None):
+        pass
+
+    def wait_for_selector(self, selector, timeout=None):
+        pass
+
+    def click(self, selector, timeout=None):
+        self.clicked.append(selector)
+
+    def fill(self, selector, value, timeout=None):
+        self.filled.append((selector, value))
+
+    def type(self, selector, value, delay=None, timeout=None):
+        self.typed.append((selector, value))
+
+    def query_selector(self, selector):
+        return _Visible(True)
+
+    def is_closed(self):
+        return False
+
+    def content(self):
+        return "<html><body><div class='account-number'>01999888777</div></body></html>"
+
+    def wait_for_timeout(self, ms):
+        pass
+
+
+class OuterPage(FakePage):
+    """The deposit tab whose Confirm click opens the provider tab."""
+
+    def query_selector(self, selector):
+        return _Visible(True)
+
+
+def test_a_step_can_follow_the_flow_into_a_new_tab():
+    """LightSpeed confirms into a provider tab that only then shows the account. The walk
+    follows into it, fills the payer's number, clicks Next, and captures that tab."""
+    fetcher = BrowserFetcher(
+        flow=[
+            Step(click="#deposit_button", opens_tab=True, wait_for="input"),
+            Step(fill="input", value="01711111111"),
+            Step(click="button.next", wait_for=".account-number"),
+        ]
+    )
+    popup = NewTabPage()
+    fetcher._context = _FakeContext(popup)
+    outer = OuterPage()
+
+    assert fetcher._walk(outer, outer) is None
+    # The popup became the document, the number was typed there, Next was clicked there.
+    assert fetcher._popup is popup
+    assert popup.typed == [("input", "01711111111")]
+    assert "button.next" in popup.clicked
+
+
+def test_the_capture_target_is_the_new_tab_when_one_opened():
+    fetcher = BrowserFetcher(frame="/paysystems/deposit")
+    popup = NewTabPage()
+    fetcher._popup = popup
+    assert fetcher._capture_target(OuterPage(), navigated=False) is popup
+
+
+def test_opens_tab_that_yields_no_tab_is_a_reported_step_not_a_crash():
+    fetcher = BrowserFetcher(flow=[Step(click="#deposit_button", opens_tab=True)])
+    fetcher._context = _FakeContext(None)  # expect_page().value is None
+    error = fetcher._walk(OuterPage(), OuterPage())
+    assert error is not None and "new tab" in error
+
+
+# ------------------------------------------------------- a value read from the environment
+
+
+def test_a_fill_value_can_come_from_the_environment(monkeypatch):
+    monkeypatch.setenv("GHT_TEST_MSISDN", "01712345678")
+    assert BrowserFetcher._resolve_value("${GHT_TEST_MSISDN}") == "01712345678"
+    assert BrowserFetcher._resolve_value("literal") == "literal"
+
+
+def test_an_unset_env_value_resolves_to_empty(monkeypatch):
+    monkeypatch.delenv("GHT_TEST_MSISDN", raising=False)
+    assert BrowserFetcher._resolve_value("${GHT_TEST_MSISDN}") == ""
+
+
+def test_a_fill_step_whose_env_value_is_unset_is_reported(monkeypatch):
+    monkeypatch.delenv("GHT_TEST_MSISDN", raising=False)
+    fetcher = BrowserFetcher(flow=[Step(fill="input", value="${GHT_TEST_MSISDN}")])
+    page = OuterPage()
+    error = fetcher._walk(page, page)
+    assert error is not None and "resolved to empty" in error
+
+
+# ---------------------------------------------------- opts a probe out until its env is set
+
+
+def test_opens_tab_is_rejected_on_a_non_click_step():
+    with pytest.raises(ValidationError):
+        Step(fill="input", value="x", opens_tab=True)
+
+
+def test_a_probe_is_skipped_until_its_required_env_is_set(monkeypatch):
+    from ght.pipeline.run import probes_of
+    from ght.sources import Probe
+
+    config = SourceConfig(
+        slug="s", name="s", fetcher="browser",
+        urls=[SourceUrl(url="https://x.invalid/")],
+        probes=[
+            Probe(name="always", flow=[Step(click=".a")]),
+            Probe(name="opt-in", flow=[Step(click=".b")], requires_env="GHT_TEST_OPTIN"),
+        ],
+    )
+    monkeypatch.delenv("GHT_TEST_OPTIN", raising=False)
+    assert [p.name for p in probes_of(config)] == ["always"]
+    monkeypatch.setenv("GHT_TEST_OPTIN", "01700000000")
+    assert [p.name for p in probes_of(config)] == ["always", "opt-in"]

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass, field
 
@@ -146,12 +147,16 @@ def probes_of(config: SourceConfig) -> list[Probe]:
     deposit *request* on the operator — no funds move and nothing is paid, but the request
     is initiated every run. The flag is kept as metadata so the portal can show which
     probes do this; it is not filtered out, because collecting those payees is the point.
+
+    A probe that names ``requires_env`` is skipped while that variable is unset. It types a
+    value that lives outside git - a payer's phone number - and for a creates_order probe
+    skipping it also means no order is raised, so it stays off until the operator opts in by
+    setting the number.
     """
-    if config.probes:
-        return config.probes
-    return [
+    probes = config.probes or [
         Probe(name=config.slug, flow=config.flow, wait_for=config.wait_for, blocks=config.blocks)
     ]
+    return [p for p in probes if not p.requires_env or os.environ.get(p.requires_env)]
 
 
 def config_for_probe(config: SourceConfig, probe: Probe) -> SourceConfig:

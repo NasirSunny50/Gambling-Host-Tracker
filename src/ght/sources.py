@@ -106,12 +106,19 @@ class Step(_Strict):
     wait_for: str | None = None
     # A step that may legitimately be absent (an interstitial that only shows sometimes).
     optional: bool = False
+    # This click opens the payee flow in a *new browser tab*, not in the current one. Some
+    # methods confirm a deposit and hand off to the provider in a popup: the account only
+    # appears there, so the walk has to follow into it. Every step after this one, and the
+    # capture, act on the new tab. Only a click can open one.
+    opens_tab: bool = False
 
     @model_validator(mode="after")
     def _one_action(self) -> Step:
         actions = [bool(self.click), bool(self.select), bool(self.fill)]
         if sum(actions) != 1:
             raise ValueError("a step needs exactly one of click, select or fill")
+        if self.opens_tab and not self.click:
+            raise ValueError("opens_tab is only meaningful on a click step")
         if self.select and not self.option:
             raise ValueError(f"select {self.select!r} needs an option to choose")
         if self.fill and self.value is None:
@@ -148,6 +155,11 @@ class Probe(_Strict):
     # a deposit request on the operator (no funds move, nothing is paid). Surfaced in the
     # portal so it is clear which probes have that side effect.
     creates_order: bool = False
+    # An environment variable this probe needs before it may run. Its flow types a value
+    # kept out of git (a payer's phone number a P2P method wants), and until the operator
+    # sets it the probe is skipped entirely - which for a creates_order probe also means no
+    # deposit order is raised. Opt-in by design: the number is personal and the order real.
+    requires_env: str | None = None
 
 
 class Login(_Strict):

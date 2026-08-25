@@ -122,20 +122,41 @@ probes:
     wait_for: ".merchant-name"
     merchant: ".merchant-name"
 
-  # LightSpeed Bkash is the other paykassma2 redirect, the bKash twin of Fast Nagad. Same
-  # shape: open the modal, confirm, land on the provider's checkout that names a merchant.
-  # Same cost, too - a real deposit order per walk - so it is creates_order and only runs
-  # when the operator has agreed to it. The destination selector is modelled on Fast Nagad
-  # and wants a live check the first time it runs.
+  # LightSpeed Bkash (bkash_p2p_webdef). Unlike Fast Nagad, this one confirms into a NEW TAB
+  # that asks for the payer's bKash number and, on Next, reveals the receiving account - a
+  # real number to collect, not just a name. So it types a number and follows into the tab.
+  #
+  # Two things make it opt-in and safe:
+  #   - requires_env: it will not run at all until the operator sets GHT_1XBET_PAYER_MSISDN
+  #     in .env (the payer's own 11-digit number, kept out of git). While unset the probe is
+  #     skipped, so no deposit order is raised either.
+  #   - creates_order: once enabled, each walk confirms a real (unpaid) deposit request.
+  #
+  # UNVERIFIED: the method was switched off site-side when this was written, so the new-tab
+  # selectors below (phone input, Next, the account element) are the expected shape and want
+  # a live check the first time the method is back - the first captured page will show the
+  # true markup. The capability (opens_tab, form fill, ${env}) is tested; these selectors
+  # are the config to confirm.
   - name: lightspeed-bkash
     channel: bkash
     creates_order: true
+    requires_env: GHT_1XBET_PAYER_MSISDN
     flow:
       - click: '.payment-cell[data-method="bkash_p2p_webdef"]'
         wait_for: "#deposit_button"
+      # Confirm opens the provider's page in a new tab; the flow follows into it.
       - click: "#deposit_button"
-    wait_for: ".merchant-name"
-    merchant: ".merchant-name"
+        opens_tab: true
+        wait_for: 'input[type="tel"], input[type="number"], input'
+      # The payer's own number, read from .env, not stored here.
+      - fill: 'input[type="tel"], input[type="number"], input'
+        value: "${GHT_1XBET_PAYER_MSISDN}"
+      - click: 'button:has-text("Next"), button[type="submit"], .btn-next'
+        wait_for: ".account-number, .modal-message-address, .receiver"
+    wait_for: ".account-number, .modal-message-address, .receiver"
+    blocks:
+      - channel: bkash
+        value: ".account-number, .modal-message-address, .receiver"
 
 # Found and walked at run time rather than named. See the block comment on `probes`.
 discover:
@@ -277,7 +298,17 @@ notes: |
   with no number, which is expected - the first two are name-only probes, the third yields
   nothing.
 
-  Still wants a live check the first time it runs:
-    - `lightspeed-bkash` — its redirect destination selector is copied from `fast-nagad`.
-      creates_order, so it only runs when the operator agrees; not walked in the discovery
-      test above (that opens modals only, never confirms).
+  2026-08-25 walked the two paykassma redirects to settle what each can yield:
+
+    - Fast Nagad: Confirm navigates the SAME tab to payment.mynagad.com's checkout, which
+      shows the rotating merchant name (captured by `.merchant-name`) and asks for the
+      PAYER's Nagad number - there is no receiving account to collect. So Fast Nagad is a
+      name only, and the existing probe already gets it. Nothing more to do.
+
+    - LightSpeed Bkash (bkash_p2p_webdef) was switched off site-side, so its flow could not
+      be walked live. Per the operator it confirms into a NEW TAB, takes the payer's bKash
+      number, and reveals the receiving account on Next - a real number, unlike Fast Nagad.
+      The probe is built for that (opens_tab, form fill, ${env}) but its new-tab selectors
+      are unverified until the method returns; the first captured page will show the markup.
+      It is opt-in: `requires_env: GHT_1XBET_PAYER_MSISDN` means it does not run - and raises
+      no order - until the operator puts an 11-digit number in .env.

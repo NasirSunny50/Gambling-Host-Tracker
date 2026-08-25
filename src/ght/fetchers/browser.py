@@ -11,6 +11,7 @@ non-technical reviewer can actually read.
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -151,6 +152,10 @@ class BrowserFetcher:
         self._unavailable_hit: str | None = None
         # Set by _walk when a step moved the flow into a different frame.
         self._entered_frame = None
+        # The browser context of the current fetch, so a step can catch a popup it opens.
+        self._context = None
+        # Set by _walk when a step opened the flow in a new tab: the page to read from then.
+        self._popup = None
         # How to close an open modal so the next probe can use the same loaded panel.
         self.reset = reset
         # The element worth photographing, when the page around it is not.
@@ -205,6 +210,35 @@ class BrowserFetcher:
             waited += 500
         return None
 
+    @staticmethod
+    def _resolve_value(value: str | None) -> str:
+        """A flow value, with ``${NAME}`` read from the environment.
+
+        Keeps a payer's phone number out of git: the config names the variable, .env holds
+        the number. A plain string is returned unchanged; an unset variable becomes empty,
+        which the caller reports rather than typing nothing into the form."""
+        if value and value.startswith("${") and value.endswith("}"):
+            return os.environ.get(value[2:-1], "")
+        return value or ""
+
+    def _click_into_new_tab(self, target, selector: str):
+        """Click something that opens a new tab, and return that tab once it has loaded.
+
+        The provider hands the deposit flow off in a popup, so the click is wrapped in a
+        wait for the context to open a page. None if no tab appears - reported by the walk as
+        a broken step, since the flow cannot continue where it expected to."""
+        if self._context is None:
+            target.click(selector, timeout=self.flow_timeout)
+            return None
+        try:
+            with self._context.expect_page(timeout=self.flow_timeout) as popup:
+                target.click(selector, timeout=self.flow_timeout)
+            new_page = popup.value
+            new_page.wait_for_load_state("domcontentloaded", timeout=self.flow_timeout)
+            return new_page
+        except Exception:  # noqa: BLE001 - no tab is a reportable broken step, not a crash
+            return None
+
     def _walk(self, target, page=None) -> str | None:
         """Click through the configured flow. Returns an error string if a step fails.
 
@@ -218,6 +252,7 @@ class BrowserFetcher:
         """
         self._unavailable_hit = None
         self._entered_frame = None
+        self._popup = None
         tab = page or target
         for index, step in enumerate(self.flow, start=1):
             try:
@@ -228,7 +263,15 @@ class BrowserFetcher:
                     target = entered
                     self._entered_frame = entered
                 target.wait_for_selector(step.target, timeout=self.flow_timeout)
-                if step.select:
+                if step.opens_tab:
+                    # The click hands off to a new tab; catch it and make it the document
+                    # the rest of the flow, and the capture, work in.
+                    new_page = self._click_into_new_tab(target, step.click)
+                    if new_page is None:
+                        return f"flow step {index}: no new tab opened by {step.click!r}"
+                    target = tab = self._popup = new_page
+                    self._entered_frame = None
+                elif step.select:
                     missing = self._missing_option(target, step)
                     if missing is not None:
                         return f"flow step {index}: {missing}"
@@ -239,12 +282,19 @@ class BrowserFetcher:
                         step.select, label=step.option, force=True, timeout=self.flow_timeout
                     )
                 elif step.fill:
+                    # A value written as ${NAME} is read from the environment, so a payer's
+                    # own phone number - which a P2P method wants typed to reveal the payee -
+                    # lives in .env beside the login credentials, never in the git-tracked
+                    # config.
+                    typed = self._resolve_value(step.value)
+                    if typed == "" and step.value:
+                        return f"flow step {index}: value {step.value!r} resolved to empty"
                     # Typed rather than assigned: these forms enable the next button from
                     # the input's own key events, and a value set straight onto the element
                     # leaves the button disabled and the step reported as a broken selector.
                     target.click(step.fill, timeout=self.flow_timeout)
                     target.fill(step.fill, "", timeout=self.flow_timeout)
-                    target.type(step.fill, step.value, delay=40, timeout=self.flow_timeout)
+                    target.type(step.fill, typed, delay=40, timeout=self.flow_timeout)
                 else:
                     target.click(step.click, timeout=self.flow_timeout)
                 if step.wait_for:
@@ -415,6 +465,9 @@ class BrowserFetcher:
         new page, so the embedded app is no longer what we came for even if a frame by that
         name still exists on it.
         """
+        # A step that opened a new tab put the payee there; that is the document to read.
+        if self._popup is not None and not self._popup.is_closed():
+            return self._popup
         if navigated:
             return page
         # A step that moved into another frame - a provider's own deposit form - is where
@@ -537,6 +590,7 @@ class BrowserFetcher:
                     viewport={"width": 1366, "height": 900},
                     **auth_kwargs,
                 )
+                self._context = context
                 page = context.new_page()
                 response = None
                 landing = urls[0] if urls else ""
@@ -931,7 +985,7 @@ class BrowserFetcher:
             url=redact_url(target.url),
             status_code=response.status if response else 0,
             html=html,
-            screenshot=self._shoot(page, target),
+            screenshot=self._shoot(self._popup or page, target),
             headers=dict(response.headers) if response else {},
             fetcher=self.name,
             fetched_at=datetime.now(UTC),
@@ -1039,6 +1093,7 @@ class BrowserFetcher:
                     viewport={"width": 1366, "height": 900},
                     **auth_kwargs,
                 )
+                self._context = context
                 page = context.new_page()
                 response, load_error = self._goto(page, url)
                 if response is None:
@@ -1071,7 +1126,7 @@ class BrowserFetcher:
                     url=redact_url(target.url),
                     status_code=response.status if response else 0,
                     html=html,
-                    screenshot=self._shoot(page, target),
+                    screenshot=self._shoot(self._popup or page, target),
                     headers=dict(response.headers) if response else {},
                     fetcher=self.name,
                     fetched_at=datetime.now(UTC),
