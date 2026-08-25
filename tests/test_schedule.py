@@ -23,11 +23,13 @@ class FakeManager:
         self.is_running = running
         self.accepts = accepts
         self.started: list[str] = []
+        self.sources: list[str] = []
 
-    def start(self, slug: str):
+    def start(self, slug: str, source: str = "manual"):
         if not self.accepts:
             return False, f"a collection is already running ({slug})"
         self.started.append(slug)
+        self.sources.append(source)
         return True, f"collection started for {slug}"
 
 
@@ -79,6 +81,19 @@ def test_the_next_one_is_an_interval_later(scheduler):
     assert sched.tick() is None
     assert manager.started == ["1xbet-bd"]
     assert 29 * 60 <= sched.seconds_until_next <= 30 * 60
+
+
+def test_a_scheduled_fetch_says_the_schedule_started_it(scheduler):
+    """The portal shows a fetch in the lane it came from, so an operator who finds one
+    already running can tell whether it is theirs or the timer firing unattended. That only
+    works if the scheduler says so when it starts one."""
+    manager = FakeManager()
+    sched = scheduler(manager)
+    sched.start("1xbet-bd", 30)
+    _due_now(sched)
+    sched.tick()
+
+    assert manager.sources == ["schedule"]
 
 
 def test_an_interval_too_short_to_be_sane_is_refused(scheduler):

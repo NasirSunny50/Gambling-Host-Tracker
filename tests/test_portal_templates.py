@@ -429,8 +429,60 @@ RUNS_BASE = {
 def test_idle_runs_page_offers_to_start_one():
     html = render("runs.html", job=job(), job_running=False, waiting=False, seconds_left=None,
                   phases=[], **RUNS_BASE)
-    assert "Start an account fetch" in html
+    assert "Fetch now" in html
     assert "Fetch history" in html
+
+
+def _lanes(html: str) -> tuple[str, str]:
+    """The two columns of the fetch page, split on their openers.
+
+    Splitting on the markers rather than parsing: the point of the assertions below is
+    *which side* a card landed on, and the two lane openers bound that exactly.
+    """
+    left = html.index('<div class="lane">')
+    right = html.index('<div class="lane">', left + 1)
+    # Bounded by the history heading rather than the next </section>: a lane holding a
+    # fetch in progress holds a <section> of its own, and closing on that swallowed the
+    # schedule card sitting underneath it.
+    end = html.index("Fetch history", right)
+    return html[left:right], html[right:end]
+
+
+def test_a_manual_fetch_reports_in_the_manual_lane():
+    """The two ways to fetch are columns, and a fetch belongs to the column that started
+    it. A fetch nobody started is the schedule firing, and that is only readable from the
+    page if the schedule's runs stay on the schedule's side."""
+    html = render("runs.html", job=job(True, in_flight()), job_running=True, waiting=False,
+                  seconds_left=None, run_source="manual",
+                  phases=phases(["done", "active", "pending"]), **RUNS_BASE)
+    left, right = _lanes(html)
+    assert "Fetch in progress" in left
+    assert "Fetch in progress" not in right
+
+
+def test_a_scheduled_fetch_stays_out_of_the_manual_lane():
+    html = render("runs.html", job=job(True, in_flight()), job_running=True, waiting=False,
+                  seconds_left=None, run_source="schedule",
+                  phases=phases(["done", "active", "pending"]), **RUNS_BASE)
+    left, right = _lanes(html)
+    assert "Fetch in progress" in right
+    assert "Fetch in progress" not in left
+    # The manual side keeps its card rather than going blank, but cannot start a second
+    # fetch on top of the one running - the run manager would refuse it anyway.
+    assert 'id="run-slug"' in left
+    assert "disabled" in left
+
+
+def test_the_button_comes_back_beside_the_outcome():
+    """After a manual fetch ends, its outcome and the button sit together: the next thing
+    wanted is usually another fetch, and hiding it behind a reload was one click too many."""
+    html = render("runs.html", job=job(), job_running=False, waiting=False, seconds_left=None,
+                  run_source="manual",
+                  finished=in_flight(finished_at=LATER, returncode=0, message="Finished"),
+                  phases=phases(["done", "done", "done"]), **RUNS_BASE)
+    left, _ = _lanes(html)
+    assert "Fetch finished" in left
+    assert 'id="run-slug"' in left
 
 
 def test_waiting_for_sign_in_says_it_is_not_an_error():

@@ -125,6 +125,11 @@ def release_run_lock(path: Path = LOCK_PATH) -> None:
 class RunInfo:
     slug: str
     started_at: datetime
+    # Who asked for this fetch: "manual" for the button, "schedule" for the timer. The
+    # portal offers the two as side-by-side lanes and shows a fetch's progress in the lane
+    # that started it, so an operator can tell at a glance whether what is running is theirs
+    # or the schedule firing on its own - the question a fetch nobody started always raises.
+    source: str = "manual"
     finished_at: datetime | None = None
     returncode: int | None = None
     # Live state, updated from the subprocess as it works. The portal renders this as a
@@ -202,8 +207,12 @@ class RunManager:
     def is_running(self) -> bool:
         return self._current is not None and self._current.running
 
-    def start(self, slug: str) -> tuple[bool, str]:
-        """Launch a fetch, for one site or for all of them. Returns (started, message)."""
+    def start(self, slug: str, source: str = "manual") -> tuple[bool, str]:
+        """Launch a fetch, for one site or for all of them. Returns (started, message).
+
+        ``source`` records who asked - the button or the schedule - so the portal can show
+        the run in the lane it came from. It changes nothing about how the fetch runs.
+        """
         with self._lock:
             if self.is_running:
                 return False, f"a fetch is already running ({self._current.slug})"
@@ -230,7 +239,7 @@ class RunManager:
                 stderr=subprocess.STDOUT,
                 text=True,
             )
-            self._current = RunInfo(slug=slug, started_at=datetime.now(UTC))
+            self._current = RunInfo(slug=slug, started_at=datetime.now(UTC), source=source)
             self._log_tail = []
             threading.Thread(target=self._watch, args=(self._proc, self._current), daemon=True).start()
             return True, f"fetch started for {slug}"

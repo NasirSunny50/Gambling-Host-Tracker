@@ -837,6 +837,10 @@ def runs(
             "waiting": waiting,
             "seconds_left": _seconds_left(info) if waiting else None,
             "phases": phases,
+            # Which of the two lanes shows this fetch: the one that started it. A fetch the
+            # schedule fired stays on the schedule side rather than taking over the button's
+            # column, so "did I start this?" is answered by where it is.
+            "run_source": getattr(shown, "source", "manual") if shown else "manual",
             "elapsed": _elapsed(shown) if shown else "",
             "finished": finished,
             "last_run": last_run,

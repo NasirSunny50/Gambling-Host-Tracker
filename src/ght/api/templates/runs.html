@@ -49,8 +49,6 @@
 {% else %}
 <section class="panel sched">
   <h2 class="sched-title">Fetch on a schedule</h2>
-  <p class="sched-why">Fetches on its own in the background, without anyone here. The
-     numbers rotate through the day, so a schedule catches the ones a person would miss.</p>
 
   <form method="post" action="/schedule" class="sched-form">
     <div class="field">
@@ -87,6 +85,30 @@
 {% endif %}
 {% endmacro %}
 
+{# The manual card, defined here so a lane can place it: the two ways to fetch are columns,
+   and a fetch shows its progress in the column it was started from. #}
+{% macro manual_card(busy=false) %}
+<form method="post" action="/runs" class="panel start-card" onsubmit="return confirmRun(this)">
+  <h2 class="start-title">Fetch now</h2>
+  <div class="field">
+    <label class="field-label" for="run-slug">Site</label>
+    <select name="slug" id="run-slug" {{ "disabled" if busy }}>
+      {% for s in runnable %}
+        <option value="{{ s.slug }}">{{ s.name }}{{ " (draft)" if s.status != "active" }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  {# The button is offered but refused while something else is in flight, and saying so
+     here beats letting the click bounce off the run manager with an error. #}
+  <button class="btn-primary btn-lg" type="submit" {{ "disabled" if busy }}>
+    &#9654; Fetch accounts now</button>
+  {% if busy %}<p class="field-note">A fetch is already running &mdash; see the other column.</p>{% endif %}
+</form>
+{% endmacro %}
+
+{# Whatever the current fetch is doing: waiting on a sign-in, working, or just finished.
+   One macro, placed in one lane, so the three states never appear in different places. #}
+{% macro activity_card() %}
 {% if waiting %}
   {# The hardest moment in the whole product: nothing is broken, but nothing continues
      until a person signs in. Calm blue rather than red, an explicit "not an error", and
@@ -121,9 +143,6 @@
     {{ ui.phases(phases) }}
   </section>
 
-  {# A fetch in flight takes the full width; the schedule keeps its place underneath. #}
-  {{ schedule_card() }}
-
 {% elif job_running %}
   <section class="panel run-card">
     <div class="run-head">
@@ -139,13 +158,10 @@
     </div>
   </section>
 
-  {{ schedule_card() }}
-
-{% else %}
+{% elif finished %}
   {# Shown once, on the load that follows the run ending. A reload stands it down — the
      run is in the history table below either way. #}
-  {% if finished %}
-    {% set failed = finished.failed or (last_run and last_run.status in ("failed", "blocked")) %}
+  {% set failed = finished.failed or (last_run and last_run.status in ("failed", "blocked")) %}
     <section class="panel run-card">
       <div class="run-head">
         {% if last_run %}{{ ui.outcome_pill(last_run.status) }}
@@ -183,30 +199,35 @@
       {% if job_log %}<div class="logbox">{% for line in job_log %}{{ line }}
 {% endfor %}</div>{% endif %}
     </section>
-  {% endif %}
+{% endif %}
+{% endmacro %}
 
-  {# Once by hand, or on a timer: the two ways to fetch, offered as a pair rather than
-     one above the other. Equal columns because neither is the lesser choice. #}
-  <div class="two-up">
-    <form method="post" action="/runs" class="panel start-card" onsubmit="return confirmRun(this)">
-      <h2 class="start-title">Start an account fetch</h2>
-      <p class="start-why">Signs in, reads every payment method, saves what it finds &mdash;
-         a couple of minutes, and this page keeps itself up to date. Choose
-         <strong>All sites</strong> and it works through them one after another.</p>
-      <div class="field">
-        <label class="field-label" for="run-slug">Site</label>
-        <select name="slug" id="run-slug">
-          {% for s in runnable %}
-            <option value="{{ s.slug }}">{{ s.name }}{{ " (draft)" if s.status != "active" }}</option>
-          {% endfor %}
-        </select>
-      </div>
-      <button class="btn-primary btn-lg" type="submit">&#9654; Fetch accounts now</button>
-    </form>
+{# Two lanes, always both there: fetching by hand on the left, the schedule on the right.
+   A fetch reports in the lane it came from, so an operator who finds one already running
+   can tell whose it is by where it sits - the schedule fires unattended, and "did I start
+   this?" was otherwise unanswerable from the page. A scheduled fetch therefore never moves
+   into the manual column, and the manual column keeps offering the button. #}
+{% set in_flight = waiting or job_running %}
+{% set activity = in_flight or finished %}
+{# Defaulted rather than read raw: an undefined value would quietly compare false and put
+   every fetch in the manual lane, which is the one wrong answer that looks right. #}
+{% set schedule_lane = activity and (run_source | default("manual")) == "schedule" %}
+{% set manual_lane = activity and not schedule_lane %}
 
+<div class="two-up">
+  <div class="lane">
+    {% if manual_lane %}{{ activity_card() }}{% endif %}
+    {# The form stands down only while this lane's own fetch is in flight. After it ends,
+       the outcome and the button sit together - the next thing wanted is usually another
+       fetch, and hiding the button behind a reload was one click too many. #}
+    {% if not (manual_lane and in_flight) %}{{ manual_card(in_flight) }}{% endif %}
+  </div>
+
+  <div class="lane">
+    {% if schedule_lane %}{{ activity_card() }}{% endif %}
     {{ schedule_card() }}
   </div>
-{% endif %}
+</div>
 
 <section class="panel" style="margin-top:20px">
   <h2>Fetch history</h2>
@@ -238,7 +259,7 @@
 </section>
 
 <style>
-  .run-card { padding:22px 24px; margin-bottom:20px; max-width:760px; }
+  .run-card { padding:22px 24px; }
   .run-head { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
   .run-title { margin:0; font-size:16px; font-weight:700; }
   .run-head .health { margin-left:auto; }
@@ -259,16 +280,21 @@
   .two-up { display:grid; grid-template-columns:1fr 1fr; gap:16px; align-items:stretch;
             margin-bottom:20px; }
   @media (max-width:1080px) { .two-up { grid-template-columns:1fr; } }
-  .two-up > * { max-width:none; margin-bottom:0; height:100%; display:flex;
-                flex-direction:column; }
+  /* Each column is a lane that may hold one card or two - a fetch in progress above the
+     card it was started from - so the lane stacks rather than the grid cell holding a
+     single child. */
+  .lane { display:flex; flex-direction:column; gap:16px; min-width:0; }
+  .lane > * { max-width:none; margin-bottom:0; display:flex; flex-direction:column; }
+  /* A lane holding one card lets it fill the height, which is what kept the two idle
+     cards matching. A lane holding two stacks them at their natural heights instead. */
+  .lane > *:only-child { flex:1; }
   /* The cards match in height, but their buttons follow their own content rather than
      being pushed to a shared baseline: the shorter card would otherwise show a hole
      between its last field and a button floating at the bottom. */
-  .two-up > * > button[type="submit"] { align-self:flex-start; }
+  .lane > * > button[type="submit"] { align-self:flex-start; }
 
   .start-card { padding:24px; }
   .start-title { margin:0 0 6px; font-size:16px; font-weight:700; }
-  .start-why { margin:0 0 20px; color:var(--text-2); font-size:13px; max-width:60ch; }
   .field-label { display:block; font-size:12px; font-weight:600; color:var(--text-2);
                  margin-bottom:6px; }
   .start-card select, .sched .field select { width:100%; background:var(--surface-2); }
@@ -277,7 +303,7 @@
   .start-card .callout { margin-bottom:18px; }
 
   /* waiting for sign-in */
-  .waiting { max-width:760px; margin-bottom:20px; background:var(--surface); padding:26px;
+  .waiting { background:var(--surface); padding:26px;
              border:2px solid var(--info); border-radius:14px;
              box-shadow:0 8px 30px rgba(31,95,196,.18); }
   .waiting-head { display:flex; gap:16px; align-items:flex-start; margin-bottom:20px; }
@@ -302,11 +328,10 @@
      rather than being cut at seventy characters. */
   .note { white-space:normal; min-width:260px; max-width:420px; font-size:12.5px; }
   /* ---- schedule ---- */
-  .sched { max-width:760px; margin-bottom:20px; padding:22px 24px; }
-  .two-up .sched-form { flex:1; }
+  .sched { padding:22px 24px; }
+  .lane .sched-form { flex:1; }
   .sched--on { border-color:var(--accent); }
   .sched-title { margin:0 0 6px; font-size:16px; font-weight:700; }
-  .sched-why { margin:0 0 20px; color:var(--text-2); font-size:13px; max-width:60ch; }
   .sched-form { display:flex; flex-direction:column; gap:18px; align-items:flex-start; }
   .field { width:100%; }
   .field select { min-width:280px; }

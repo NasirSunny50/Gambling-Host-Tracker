@@ -214,7 +214,7 @@ class Scheduler:
                 self._save()
                 return state.last_note
 
-            started, message = self._manager.start(state.slug)
+            started, message = self._manager.start(state.slug, source="schedule")
             state.last_started = _now()
             state.last_note = message if not started else ""
             state.next_due = _now() + timedelta(minutes=state.minutes)
