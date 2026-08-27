@@ -14,12 +14,15 @@ of them racing on one login session.
 from __future__ import annotations
 
 import json
+import logging
 import threading
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from ght.config import REPO_ROOT
+
+logger = logging.getLogger(__name__)
 
 # Where the schedule is remembered. A schedule that quietly forgot itself when the portal
 # restarted would be worse than no schedule at all: the operator would believe collection
@@ -189,12 +192,29 @@ class Scheduler:
         self._thread.start()
 
     def _loop(self) -> None:
+        """Wake, look at the clock, and never die doing it.
+
+        This thread is the whole schedule. An exception escaping `tick` would end it, and
+        nothing would say so: `enabled` stays true, the page keeps counting down to a slot
+        that will never fire, and collection has silently stopped. So a tick that throws is
+        reported in `last_note` - where the page already shows why a tick did nothing - and
+        the next one is tried anyway.
+        """
         while True:
             self._wake.wait(self.TICK_SECONDS)
             self._wake.clear()
             if not self._state.enabled:
                 continue
-            self.tick()
+            try:
+                self.tick()
+            except Exception as exc:  # the schedule outlives one bad tick
+                logger.exception("a scheduled tick failed")
+                with self._lock:
+                    self._state.last_note = f"the last check failed: {type(exc).__name__}: {exc}"
+                    # Still move the slot on, or a tick that throws every time would spin
+                    # on an overdue clock for as long as the portal is up.
+                    self._state.next_due = _now() + timedelta(minutes=self._state.minutes or MIN_MINUTES)
+                    self._save()
 
     def tick(self) -> str | None:
         """One look at the clock. Returns what it did, or None if nothing was due.

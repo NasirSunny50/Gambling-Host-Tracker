@@ -1683,3 +1683,26 @@ def test_a_discovery_with_no_skip_list_walks_everything_it_matches():
     disc = Discovery(name="e-wallet", kind="cells", items=".payment-cell", value=".v",
                      label=".name", match=["bkash"])
     assert disc.skip_keys == []
+
+
+def test_a_driver_that_never_starts_is_named_rather_than_leaking_an_attribute_error():
+    """Playwright builds its object only once the node driver announces itself; when the
+    driver dies first, __enter__ reaches `playwright = self._playwright` with nothing there
+    and the run is recorded as an AttributeError about a private attribute of somebody
+    else's library. It is an environment failure an operator can fix - but only if the run
+    says which one it is."""
+    from ght.browserlaunch import describe_browser_failure
+
+    real = AttributeError("'PlaywrightContextManager' object has no attribute '_playwright'")
+    described = describe_browser_failure(real)
+    assert "browser driver did not start" in described
+    assert "_playwright" not in described
+    assert "killed mid-flight" in described  # and what to do about it
+
+    # Everything else passes through unchanged - this translates one failure, not all.
+    assert describe_browser_failure(TimeoutError("page took too long")) == (
+        "TimeoutError: page took too long"
+    )
+    assert describe_browser_failure(AttributeError("something else")) == (
+        "AttributeError: something else"
+    )

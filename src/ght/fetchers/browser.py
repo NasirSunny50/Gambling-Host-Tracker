@@ -16,6 +16,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
+from ght.browserlaunch import describe_browser_failure
 from ght.config import settings
 from ght.sources import Step
 from ght.types import RawCapture
@@ -664,7 +665,7 @@ class BrowserFetcher:
                 browser.close()
         except Exception as exc:  # noqa: BLE001 - any browser failure is a failed run
             captures.extend(
-                self._failed(urls[0] if urls else "", f"{type(exc).__name__}: {exc}")
+                self._failed(urls[0] if urls else "", describe_browser_failure(exc))
                 for _ in plans[len(captures) :]
             )
         return captures, discovered
@@ -1177,5 +1178,5 @@ class BrowserFetcher:
                 status_code=0,
                 fetcher=self.name,
                 fetched_at=datetime.now(UTC),
-                error=f"{type(exc).__name__}: {exc}",
+                error=describe_browser_failure(exc),
             )

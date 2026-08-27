@@ -135,6 +135,26 @@ never clicks further, because the click after that one is the confirm.
   be written the page is served, the session is rolled back so later queries work, and a
   warning is logged. Verified by holding a write transaction open and loading every page:
   all 200, worst case 2.3s, audit rows resuming the moment the lock clears.
+- **One dead watcher used to stop all collection, permanently.** `RunManager._watch` is
+  the only place `finished_at` is set, and `finished_at` is the only thing that makes
+  `is_running` false. It had no `try/finally`, and it read the subprocess's pipe in the
+  machine's locale encoding (cp1252 here) while the child prints Bengali payee names and
+  live tracebacks. One undecodable byte killed that thread, and the portal then believed
+  that fetch was running forever: **every scheduled slot skipped as "the previous
+  collection was still running", the manual button stayed disabled, and nothing said why**
+  until someone restarted the portal. Four fixes, all in place now: the pipe is UTF-8 with
+  `errors="replace"` (and `PYTHONIOENCODING=utf-8` for the child), `_watch` always records
+  completion in a `finally`, `is_running` asks the process (`poll()`) rather than trusting
+  belief and releases anything older than `LOCK_MAX_AGE`, and `Scheduler._loop` survives a
+  tick that throws and puts the reason in `last_note`. If collection ever silently stops
+  again, this is the shape to look for - and `/runs` showing a fetch in flight that the
+  database has no row for is the tell.
+- **`AttributeError: 'PlaywrightContextManager' object has no attribute '_playwright'`**
+  means the Playwright node driver never started, usually browsers left behind by a fetch
+  killed mid-flight. Playwright only builds its object once the driver announces itself, so
+  a driver that dies first leaves `__enter__` reading an attribute that was never set.
+  `browserlaunch.describe_browser_failure` translates it into that sentence; everything
+  else passes through unchanged.
 - **One fetch at a time, machine-wide.** The collector holds `data/run.lock` (pid + slug),
   so a scheduled fetch and a hand-started `ght run` cannot race on the login session.
 - **Rocket publishes twelve digits** — the wallet's mobile plus a check digit. The MSISDN

@@ -56,3 +56,26 @@ def open_browser(playwright, *, headed: bool = False, preferred: str | None = No
             label = identity or "bundled chromium"
             failures.append(f"{label} ({str(exc).splitlines()[0]})")
     raise RuntimeError("no usable browser: " + "; ".join(failures))
+
+
+def describe_browser_failure(exc: BaseException) -> str:
+    """What went wrong, in words a reader can act on.
+
+    One failure needs translating. `sync_playwright()` builds its object only once the node
+    driver connects and announces itself; when the driver dies first, `__enter__` reaches
+    `playwright = self._playwright` with nothing there, so the run is recorded as
+
+        AttributeError: 'PlaywrightContextManager' object has no attribute '_playwright'
+
+    which names a private attribute of somebody else's library and says nothing about a
+    browser. It is an environment failure an operator can actually fix - almost always
+    browsers left behind by a run that was killed mid-flight, still holding sockets - but
+    only if the run says which failure it was. Everything else is passed through as it is.
+    """
+    if isinstance(exc, AttributeError) and "_playwright" in str(exc):
+        return (
+            "the browser driver did not start. This is usually browsers left behind by a "
+            "fetch that was killed mid-flight, still holding the machine's resources - "
+            "clear any stray chrome/node processes and fetch again"
+        )
+    return f"{type(exc).__name__}: {exc}"

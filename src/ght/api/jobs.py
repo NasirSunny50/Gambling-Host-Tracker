@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import ctypes
 import json
+import logging
 import os
 import subprocess
 import sys
@@ -30,6 +31,8 @@ from pathlib import Path
 
 from ght.config import REPO_ROOT
 from ght.progress import PHASES, parse_line
+
+logger = logging.getLogger(__name__)
 
 # Who is collecting right now, machine-wide. Holds the pid of the process that launched
 # the collection, so a lock left behind by something that crashed can be told apart from
@@ -205,7 +208,43 @@ class RunManager:
 
     @property
     def is_running(self) -> bool:
-        return self._current is not None and self._current.running
+        """Whether a fetch is actually in flight - checked against the process, not belief.
+
+        The watcher thread normally ends a run. This is the answer for when it does not:
+        the subprocess itself is asked, and a process that has already exited is not a
+        running fetch however the portal came to think otherwise. Without this, one dead
+        watcher left every scheduled slot skipping "the previous collection was still
+        running" until someone restarted the portal.
+
+        The age cap is the last resort under that, for a subprocess that is itself hung
+        rather than gone. Same reasoning and same span as the lock file's.
+        """
+        info = self._current
+        if info is None or not info.running:
+            return False
+
+        proc = self._proc
+        # Asked defensively. This property is on the path that decides whether collection
+        # can happen at all, and it is not the place to raise on an unexpected object -
+        # raising here is how the stall this guard exists to prevent got started.
+        try:
+            exited = proc is not None and proc.poll() is not None
+        except Exception:  # noqa: BLE001 - fall through to the age cap
+            exited = False
+        too_old = datetime.now(UTC) - info.started_at > LOCK_MAX_AGE
+        if exited or too_old:
+            info.returncode = getattr(proc, "returncode", None)
+            info.message = info.message or "Stopped before finishing"
+            if not info.failed_phase:
+                info.failed_phase = info.phase or "collect"
+            info.finished_at = datetime.now(UTC)
+            logger.warning(
+                "fetch for %s was still marked running with %s; releasing it",
+                info.slug,
+                "an exited process" if exited else "no process left and no watcher",
+            )
+            return False
+        return True
 
     def start(self, slug: str, source: str = "manual") -> tuple[bool, str]:
         """Launch a fetch, for one site or for all of them. Returns (started, message).
@@ -232,12 +271,22 @@ class RunManager:
             # Without --site the CLI walks every active site in turn, which is exactly
             # what "all" means here - so there is one code path for both, not two.
             target = [] if slug == ALL_SITES else ["--site", slug]
+            # UTF-8 both ways, and never fatal. The default here is the machine's locale
+            # encoding - cp1252 on this one - on a pipe that carries payee names the sites
+            # publish in Bengali and tracebacks from a live browser. An undecodable byte
+            # raised inside the reader loop below, which is a thread nobody was watching,
+            # and one bad byte then wedged the portal (see _watch). errors="replace" makes
+            # a mangled log line the worst case instead; PYTHONIOENCODING makes the child
+            # write UTF-8 rather than failing to print a name it cannot encode.
             self._proc = subprocess.Popen(
                 [sys.executable, "-m", "ght.cli", "run", *target, "--progress"],
                 cwd=str(REPO_ROOT),
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
+                env={**os.environ, "PYTHONIOENCODING": "utf-8"},
             )
             self._current = RunInfo(slug=slug, started_at=datetime.now(UTC), source=source)
             self._log_tail = []
@@ -245,33 +294,59 @@ class RunManager:
             return True, f"fetch started for {slug}"
 
     def _watch(self, proc: subprocess.Popen, info: RunInfo) -> None:
-        """Drain output and record completion. Runs on its own thread."""
-        if proc.stdout is not None:
-            for raw in proc.stdout:
-                line = raw.rstrip()
-                if not line:
-                    continue
-                update = parse_line(line)
-                if update is not None:
-                    # A progress line drives the checklist and is not shown as raw output.
-                    info.phase = update.phase
-                    info.message = update.message
-                    info.step = update.step
-                    info.total = update.total
-                    if not update.ok:
-                        info.failed_phase = update.phase
-                    continue
-                self._log_tail.append(line)
-                del self._log_tail[:-40]  # keep only the last 40 lines
-        proc.wait()
-        info.returncode = proc.returncode
-        info.finished_at = datetime.now(UTC)
-        if info.failed_phase is not None:
-            # Keep what the run said went wrong. Replacing it with "Finished" because the
-            # process exited cleanly is how a failed collection came to look successful.
-            info.message = info.message or "Stopped before finishing"
-        else:
-            info.message = "Finished" if proc.returncode == 0 else "Stopped before finishing"
+        """Drain output and record completion. Runs on its own thread.
+
+        Everything here happens inside try/finally for one reason: ``finished_at`` is the
+        only thing that makes ``is_running`` False again, and this thread is the only place
+        that sets it. When this thread died - which it did, on a byte the pipe could not
+        decode - the portal believed that fetch was still running forever. Every scheduled
+        slot after it was skipped as "the previous collection was still running", the
+        manual button stayed disabled, and nothing said why. One unhandled exception on an
+        unwatched thread stopped all collection until someone restarted the portal.
+
+        So a crash in here can cost the log tail. It must never cost the run's completion.
+        """
+        try:
+            self._drain(proc, info)
+        except Exception as exc:  # a broken reader must not wedge the portal
+            logger.exception("reading the fetch's output failed")
+            self._log_tail.append(f"[portal] lost the fetch's output: {type(exc).__name__}: {exc}")
+        finally:
+            try:
+                proc.wait()
+            except Exception:  # noqa: BLE001, S110 - nothing left to do but stop waiting
+                pass
+            info.returncode = proc.returncode
+            if info.failed_phase is not None:
+                # Keep what the run said went wrong. Replacing it with "Finished" because
+                # the process exited cleanly is how a failed collection came to look
+                # successful.
+                info.message = info.message or "Stopped before finishing"
+            else:
+                info.message = "Finished" if proc.returncode == 0 else "Stopped before finishing"
+            # Last, and always: this is what releases the portal and the schedule.
+            info.finished_at = datetime.now(UTC)
+
+    def _drain(self, proc: subprocess.Popen, info: RunInfo) -> None:
+        """Read the subprocess's output into the checklist and the log tail."""
+        if proc.stdout is None:
+            return
+        for raw in proc.stdout:
+            line = raw.rstrip()
+            if not line:
+                continue
+            update = parse_line(line)
+            if update is not None:
+                # A progress line drives the checklist and is not shown as raw output.
+                info.phase = update.phase
+                info.message = update.message
+                info.step = update.step
+                info.total = update.total
+                if not update.ok:
+                    info.failed_phase = update.phase
+                continue
+            self._log_tail.append(line)
+            del self._log_tail[:-40]  # keep only the last 40 lines
 
     def take_finished(self) -> RunInfo | None:
         """The run that has just ended, reported once and then not again.

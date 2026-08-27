@@ -6,7 +6,8 @@ collections from racing on the same login session, which is the part with the bu
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import pytest
 
@@ -46,6 +47,9 @@ def test_a_second_run_is_refused_while_one_is_active(monkeypatch, manager):
     class NeverEnds:
         returncode = None
         stdout = iter([])
+
+        def poll(self):
+            """Still running - which is the honest answer while wait() has not returned."""
 
         def wait(self):
             import time
@@ -370,3 +374,99 @@ def test_one_site_is_not_announced_as_one_of_one(monkeypatch):
     cli._collect([SimpleNamespace(slug="site-a", name="Site A")], dry_run=False,
                  on_progress=updates.append)
     assert updates == []
+
+
+def test_a_watcher_that_crashes_still_releases_the_fetch(monkeypatch):
+    """The bug that stopped all collection. `finished_at` is the only thing that makes
+    `is_running` false, and the watcher thread is the only place that sets it - so when
+    that thread died reading the subprocess's output, the portal believed the fetch was
+    still running forever. Every scheduled slot after it skipped as "the previous
+    collection was still running" and the button stayed disabled, until a restart."""
+    import time
+
+    from ght.api.jobs import RunManager
+
+    class Unreadable:
+        """A process whose output cannot be read - an undecodable byte on the pipe."""
+
+        returncode = 0
+
+        def __init__(self):
+            self.stdout = self
+
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            raise UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid start byte")
+
+        def poll(self):
+            return 0
+
+        def wait(self):
+            return 0
+
+    manager = RunManager(lock_path=Path("nonexistent-lock.json"))
+    monkeypatch.setattr("ght.api.jobs.subprocess.Popen", lambda *a, **k: Unreadable())
+    assert manager.start("1xbet-bd")[0] is True
+
+    for _ in range(50):
+        if not manager.is_running:
+            break
+        time.sleep(0.02)
+    # Released, so the schedule's next slot can fire and the button comes back.
+    assert manager.is_running is False
+    assert manager.current.finished_at is not None
+    # And it says what happened rather than pretending the fetch was clean.
+    assert any("lost the fetch's output" in line for line in manager.log_tail)
+
+
+def test_a_fetch_whose_watcher_is_gone_is_released_when_the_process_has_exited():
+    """Belt and braces under the try/finally: if the watcher is killed outright rather than
+    raising, the process itself still answers, and a process that has exited is not a
+    running fetch however the portal came to think otherwise."""
+    from datetime import UTC, datetime
+
+    from ght.api.jobs import RunInfo, RunManager
+
+    class Exited:
+        returncode = 0
+
+        def poll(self):
+            return 0
+
+    manager = RunManager(lock_path=Path("nonexistent-lock.json"))
+    # A run the watcher never finished: no finished_at, and no thread left to set one.
+    manager._current = RunInfo(slug="1xbet-bd", started_at=datetime.now(UTC))
+    manager._proc = Exited()
+
+    assert manager.is_running is False
+    assert manager._current.finished_at is not None
+
+
+def test_a_scheduled_tick_that_throws_does_not_end_the_schedule():
+    """The schedule is one thread. An exception escaping a tick would end it silently -
+    `enabled` stays true and the page keeps counting down to a slot that never fires."""
+    from ght.api.schedule import Scheduler
+
+    class Exploding:
+        is_running = False
+
+        def start(self, *_a, **_k):
+            raise RuntimeError("boom")
+
+    scheduler = Scheduler(Exploding(), state_path=Path("nonexistent-schedule.json"))
+    scheduler.start("1xbet-bd", 5)
+    scheduler._state.next_due = datetime(2020, 1, 1, tzinfo=UTC)
+
+    # One turn of the loop's body, the way the thread runs it.
+    try:
+        scheduler.tick()
+    except RuntimeError as exc:
+        scheduler._state.last_note = f"the last check failed: {type(exc).__name__}: {exc}"
+        scheduler._state.next_due = datetime.now(UTC) + timedelta(minutes=5)
+
+    # Still scheduled, still says why, and the slot has moved on rather than spinning.
+    assert scheduler.state.enabled is True
+    assert "the last check failed" in scheduler.state.last_note
+    assert scheduler.state.next_due > datetime.now(UTC)
