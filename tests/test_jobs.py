@@ -7,7 +7,6 @@ collections from racing on the same login session, which is the part with the bu
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 
 import pytest
 
@@ -376,7 +375,7 @@ def test_one_site_is_not_announced_as_one_of_one(monkeypatch):
     assert updates == []
 
 
-def test_a_watcher_that_crashes_still_releases_the_fetch(monkeypatch):
+def test_a_watcher_that_crashes_still_releases_the_fetch(monkeypatch, tmp_path):
     """The bug that stopped all collection. `finished_at` is the only thing that makes
     `is_running` false, and the watcher thread is the only place that sets it - so when
     that thread died reading the subprocess's output, the portal believed the fetch was
@@ -406,7 +405,7 @@ def test_a_watcher_that_crashes_still_releases_the_fetch(monkeypatch):
         def wait(self):
             return 0
 
-    manager = RunManager(lock_path=Path("nonexistent-lock.json"))
+    manager = RunManager(lock_path=tmp_path / "run.lock")
     monkeypatch.setattr("ght.api.jobs.subprocess.Popen", lambda *a, **k: Unreadable())
     assert manager.start("1xbet-bd")[0] is True
 
@@ -421,7 +420,7 @@ def test_a_watcher_that_crashes_still_releases_the_fetch(monkeypatch):
     assert any("lost the fetch's output" in line for line in manager.log_tail)
 
 
-def test_a_fetch_whose_watcher_is_gone_is_released_when_the_process_has_exited():
+def test_a_fetch_whose_watcher_is_gone_is_released_when_the_process_has_exited(tmp_path):
     """Belt and braces under the try/finally: if the watcher is killed outright rather than
     raising, the process itself still answers, and a process that has exited is not a
     running fetch however the portal came to think otherwise."""
@@ -435,7 +434,7 @@ def test_a_fetch_whose_watcher_is_gone_is_released_when_the_process_has_exited()
         def poll(self):
             return 0
 
-    manager = RunManager(lock_path=Path("nonexistent-lock.json"))
+    manager = RunManager(lock_path=tmp_path / "run.lock")
     # A run the watcher never finished: no finished_at, and no thread left to set one.
     manager._current = RunInfo(slug="1xbet-bd", started_at=datetime.now(UTC))
     manager._proc = Exited()
@@ -444,7 +443,7 @@ def test_a_fetch_whose_watcher_is_gone_is_released_when_the_process_has_exited()
     assert manager._current.finished_at is not None
 
 
-def test_a_scheduled_tick_that_throws_does_not_end_the_schedule():
+def test_a_scheduled_tick_that_throws_does_not_end_the_schedule(tmp_path):
     """The schedule is one thread. An exception escaping a tick would end it silently -
     `enabled` stays true and the page keeps counting down to a slot that never fires."""
     from ght.api.schedule import Scheduler
@@ -455,7 +454,7 @@ def test_a_scheduled_tick_that_throws_does_not_end_the_schedule():
         def start(self, *_a, **_k):
             raise RuntimeError("boom")
 
-    scheduler = Scheduler(Exploding(), state_path=Path("nonexistent-schedule.json"))
+    scheduler = Scheduler(Exploding(), state_path=tmp_path / "schedule.json")
     scheduler.start("1xbet-bd", 5)
     scheduler._state.next_due = datetime(2020, 1, 1, tzinfo=UTC)
 
