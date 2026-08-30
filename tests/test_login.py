@@ -536,3 +536,38 @@ def test_a_real_environment_variable_beats_the_env_file(tmp_path, monkeypatch):
     monkeypatch.setenv("GHT_LOGIN_X_PASSWORD", "p")
 
     assert for_site("x").username == "from-env"
+
+
+def test_a_success_marker_must_be_absent_when_logged_out():
+    """`success` is matched as one comma list, so any single member satisfies it - and one
+    member that renders on the logged-out page declares victory on the login form itself.
+
+    That is what stopped 1xBet signing itself in. `.user-control-dashboard-payment` is on
+    1xBet's own logged-out login page, so the unattended attempt reported success the
+    instant it clicked submit, navigated to the deposit page while the login POST was still
+    in flight, cut it off, and then reported "the sign-in did not take". Melbet renders the
+    same element only when signed in, which is why one brand worked and the other did not.
+    """
+    from ght.sources import load_source
+
+    for slug in ("1xbet-bd", "melbet-bd"):
+        success = load_source(slug).login.success
+        assert "user-control-dashboard-payment" not in success, slug
+        assert "/office/recharge" in success, slug
+
+
+def test_a_challenge_is_a_widget_not_a_word():
+    """A CAPTCHA is recognised by its widget. Matching text meant 1xBet's block of SEO help
+    prose - "complete identity verification", "Verification checks help confirm account
+    ownership" - was read as a CAPTCHA, and every unattended sign-in aborted before it had
+    filled the form. Dropping the text match cannot cause a real CAPTCHA to be worked
+    around: one stops the success marker appearing, so the attempt fails and the assisted
+    window opens for a person exactly as before."""
+    from ght.sources import load_source
+
+    for slug in ("1xbet-bd", "melbet-bd"):
+        challenge = load_source(slug).login.challenge
+        assert challenge, slug
+        assert not any(sel.startswith("text=") for sel in challenge), slug
+        # Still watching for the real thing.
+        assert any("captcha" in sel for sel in challenge), slug

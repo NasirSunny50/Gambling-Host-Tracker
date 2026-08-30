@@ -30,12 +30,44 @@ login:
   # The form's own submit, not the header dropdown-trigger which also reads "Log in": the
   # real one is the accent, full-width button (the 1xBet class is there too, first).
   submit: ".auth-form-fields__submit, .ui-button--theme-accent.ui-button--block"
-  # Proof we are in: the deposit button only renders for a logged-in user.
-  success: '.user-control-dashboard-payment, a[href*="/office/recharge"]'
+  # Proof we are in. Every member of this list has to be absent when logged out, because
+  # `success` is matched as one comma list and any one member satisfies it - so a single
+  # bad member declares victory on the login page itself.
+  #
+  # `.user-control-dashboard-payment` was that bad member. It is rendered on 1xBet's own
+  # logged-out login page, so the unattended sign-in reported success the instant it
+  # clicked submit, navigated straight to the deposit page while the login POST was still
+  # in flight, and cut it off - then reported "the sign-in did not take". The sign-in was
+  # fine; the proof was wrong. Melbet renders that element only when signed in, which is
+  # why the same config could sign itself in there and not here.
+  #
+  # Both of these were measured logged-out and logged-in on both brands, 2026-08-30:
+  # absent before, present after.
+  success: 'a[href*="/office/recharge"], a[href*="/office/account"]'
+  # A CAPTCHA is recognised by its *widget*, never by a word on the page. This used to
+  # carry `text=/verification|captcha|not a robot/i`, and 1xBet's login page ends with a
+  # block of SEO help prose - "complete identity verification before a new password is
+  # accepted", "Verification checks help confirm account ownership" - which matched it.
+  # So every unattended sign-in aborted before it had even filled the form, reporting a
+  # CAPTCHA that was not there, and fell through to the assisted window nobody was sitting
+  # at. Melbet has the same selectors and no such prose, which is why only this brand could
+  # not sign itself in.
+  #
+  # Dropping the text match cannot cause a CAPTCHA to be worked around: a real one stops
+  # the success selector appearing, the attempt fails, and the visible window opens for a
+  # person exactly as before. It only stops prose from being mistaken for a challenge.
   challenge:
     - 'iframe[src*="captcha"]'
     - 'iframe[src*="challenge"]'
-    - 'text=/verification|captcha|not a robot/i'
+    - 'iframe[src*="recaptcha"]'
+    - 'iframe[src*="hcaptcha"]'
+    - 'iframe[src*="turnstile"]'
+    - 'iframe[title*="captcha" i]'
+    - '.g-recaptcha'
+    - '.h-captcha'
+    - '.cf-turnstile'
+    - '#captcha'
+    - '[data-sitekey]'
   # 1xBet shows a CAPTCHA on login that cannot be solved automatically, so open a visible
   # browser and let the operator sign in by hand: they solve the CAPTCHA and press the
   # site's Log in button, then collection continues. Needs a desktop — a headless server
@@ -316,3 +348,29 @@ notes: |
       are unverified until the method returns; the first captured page will show the markup.
       It is opt-in: `requires_env: GHT_1XBET_PAYER_MSISDN` means it does not run - and raises
       no order - until the operator puts an 11-digit number in .env.
+
+  2026-08-30: unattended sign-in fixed. This brand could not recover an expired session on
+  its own while Melbet, on the same engine and the same config shape, could. Two selector
+  faults, both of them "this matches on the logged-out page too":
+
+    - `challenge` carried `text=/verification|captcha|not a robot/i`. The login page ends
+      in a block of SEO help prose - "complete identity verification before a new password
+      is accepted", "Verification checks help confirm account ownership" - which matched
+      it, so every unattended attempt aborted before filling the form, reported a CAPTCHA
+      that was not there, and fell through to the assisted window nobody was sitting at.
+      Now matched on actual widgets (recaptcha/hcaptcha/turnstile iframes, [data-sitekey]
+      and friends). Verified: none of them match this login page.
+
+    - `success` carried `.user-control-dashboard-payment`, which 1xBet renders while
+      LOGGED OUT. `success` is one comma list and any member satisfies it, so the attempt
+      declared victory the instant it clicked submit, navigated to the deposit page while
+      the login POST was still in flight, cut it off, and reported "the sign-in did not
+      take". The sign-in was fine the whole time. Measured on both brands, logged-out and
+      logged-in: `a[href*="/office/recharge"]` and `a[href*="/office/account"]` are absent
+      before and present after, on both. Melbet renders the payment element only when
+      signed in, which is the whole of why one brand worked and the other did not.
+
+  Verified end to end: session file emptied, then `perform_login` returned "signed in
+  automatically and saved the session" with no window, and the saved session proves out
+  against the live deposit panel. Both brands.
+

@@ -32,12 +32,34 @@ login:
   username: "input#username"
   password: "input#username-password"
   submit: ".auth-form-fields__submit, .ui-button--theme-accent.ui-button--block"
-  # Proof we are in: the deposit button only renders for a logged-in user.
-  success: '.user-control-dashboard-payment, a[href*="/office/recharge"]'
+  # Proof we are in. Every member of this list has to be absent when logged out, because
+  # `success` is matched as one comma list and any one member satisfies it - so a single
+  # bad member declares victory on the login page itself.
+  #
+  # `.user-control-dashboard-payment` was that bad member. It is rendered on 1xBet's own
+  # logged-out login page, so the unattended sign-in reported success the instant it
+  # clicked submit, navigated straight to the deposit page while the login POST was still
+  # in flight, and cut it off - then reported "the sign-in did not take". The sign-in was
+  # fine; the proof was wrong. Melbet renders that element only when signed in, which is
+  # why the same config could sign itself in there and not here.
+  #
+  # Both of these were measured logged-out and logged-in on both brands, 2026-08-30:
+  # absent before, present after.
+  success: 'a[href*="/office/recharge"], a[href*="/office/account"]'
+  # Widgets, not words - kept identical to the other brand, which runs the same engine.
+  # See the 1xBet config for why a text match on "verification" was wrong.
   challenge:
     - 'iframe[src*="captcha"]'
     - 'iframe[src*="challenge"]'
-    - 'text=/verification|captcha|not a robot/i'
+    - 'iframe[src*="recaptcha"]'
+    - 'iframe[src*="hcaptcha"]'
+    - 'iframe[src*="turnstile"]'
+    - 'iframe[title*="captcha" i]'
+    - '.g-recaptcha'
+    - '.h-captcha'
+    - '.cf-turnstile'
+    - '#captcha'
+    - '[data-sitekey]'
   # Kept as a safety net only: with the selectors above the unattended sign-in succeeds, so
   # the window stays shut. It opens solely if the site ever does answer with a real CAPTCHA.
   assisted: true
