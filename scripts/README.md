@@ -1,5 +1,22 @@
 # Scripts
 
+## `Setup.bat`
+
+Run this once on a **new PC**. Copy the project folder over, double-click `Setup.bat`,
+and it installs everything the tracker needs: it finds Python (and stops with a link if
+it is missing), creates the virtualenv, installs the project with all three extras
+(browser, api, export), downloads the Chromium browser Playwright drives, seeds `.env`
+from the example, and creates the `data\` folders. It is idempotent - anything already
+done is skipped - so a setup interrupted halfway just resumes.
+
+The one thing it cannot install is Python itself; if Python is missing it stops and points
+you at https://www.python.org/downloads/ (tick "Add python.exe to PATH" in the installer).
+After Setup finishes, fill the `GHT_LOGIN_...` lines in `.env` and start with `Start.bat`.
+
+`Start.bat` runs the same install on its own first launch (via `_ensure-env.bat`), so
+Setup is not strictly required - but it does the whole job up front, checks Python and the
+version, seeds `.env`, and reports each step, which is what a fresh machine wants.
+
 ## `Start.bat`
 
 Double-click it. That is the whole workflow.

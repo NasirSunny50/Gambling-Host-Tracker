@@ -1,0 +1,8 @@
+@echo off
+set "PY="
+py -3 --version >nul 2>&1 && set "PY=py -3"
+if not defined PY ( python --version >nul 2>&1 && set "PY=python" )
+if not defined PY ( echo NO-PYTHON & exit /b 1 )
+%PY% -c "import sys; sys.exit(0 if sys.version_info[:2] >= (3, 11) else 1)"
+if errorlevel 1 ( echo VERSION-OLD & exit /b 1 )
+for /f "delims=" %%v in (%PY%

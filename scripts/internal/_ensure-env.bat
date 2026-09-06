@@ -15,7 +15,7 @@ if errorlevel 1 (
 
 echo Installing dependencies. This happens once and can take a few minutes...
 ".venv\Scripts\python.exe" -m pip install --upgrade pip
-".venv\Scripts\python.exe" -m pip install -e ".[browser,api]"
+".venv\Scripts\python.exe" -m pip install -e ".[browser,api,export]"
 if errorlevel 1 (
   echo.
   echo Dependency install failed. See the messages above.
