@@ -68,16 +68,22 @@ exit /b 0
 
 :locate
 REM Find a just-installed Python without a new window. First re-read PATH from the
-REM registry - PrependPath / winget write it there but not into this session - then
-REM fall back to the exe at its known per-user install location.
+REM registry - PrependPath / winget write it there but not into this session - then,
+REM if that still does not surface it, put the exe's own folder on this session's PATH
+REM and use the bare `python`. GHT_PY is only ever `py -3` or `python`, never a full
+REM path: a quoted path travels badly through `venv` and later reads back broken.
 call :refreshpath
 call :try py -3
 if defined GHT_PY exit /b 0
 call :try python
 if defined GHT_PY exit /b 0
-for /d %%d in ("%LocalAppData%\Programs\Python\Python3*") do if exist "%%d\python.exe" set GHT_PY="%%d\python.exe"
-if defined GHT_PY exit /b 0
-for /d %%d in ("%ProgramFiles%\Python3*") do if exist "%%d\python.exe" set GHT_PY="%%d\python.exe"
+set "GHT_PYDIR="
+for /d %%d in ("%LocalAppData%\Programs\Python\Python3*") do if exist "%%d\python.exe" set "GHT_PYDIR=%%d"
+if not defined GHT_PYDIR for /d %%d in ("%ProgramFiles%\Python3*") do if exist "%%d\python.exe" set "GHT_PYDIR=%%d"
+if defined GHT_PYDIR (
+  set "PATH=%GHT_PYDIR%;%GHT_PYDIR%\Scripts;%PATH%"
+  call :try python
+)
 exit /b 0
 
 :refreshpath
