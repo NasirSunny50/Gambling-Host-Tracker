@@ -1,5 +1,8 @@
 @echo off
-REM Double-click this to use the tracker.
+REM Double-click this to use the tracker. On a brand-new PC it installs everything
+REM it needs with nothing to click - Python if the machine does not have it, then
+REM the dependencies and the browser - and then opens the portal. On every launch
+REM after that it starts instantly.
 REM Opens the portal in your browser. Keep this window open while you work;
 REM close it (or press Ctrl+C) to stop.
 title Host Tracker

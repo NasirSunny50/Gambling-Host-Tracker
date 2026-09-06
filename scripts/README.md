@@ -3,19 +3,21 @@
 ## `Setup.bat`
 
 Run this once on a **new PC**. Copy the project folder over, double-click `Setup.bat`,
-and it installs everything the tracker needs: it finds Python (and stops with a link if
-it is missing), creates the virtualenv, installs the project with all three extras
-(browser, api, export), downloads the Chromium browser Playwright drives, seeds `.env`
-from the example, and creates the `data\` folders. It is idempotent - anything already
+and it installs everything the tracker needs with **nothing to click** - including
+**Python itself if the PC does not have it** (via winget, or the official python.org
+installer as a fallback, both per-user so no admin prompt). Then it creates the virtualenv,
+installs the project with all three extras (browser, api, export), downloads the Chromium
+browser Playwright drives, seeds `.env` from the example, and creates the `data\` folders. It is idempotent - anything already
 done is skipped - so a setup interrupted halfway just resumes.
 
-The one thing it cannot install is Python itself; if Python is missing it stops and points
-you at https://www.python.org/downloads/ (tick "Add python.exe to PATH" in the installer).
-After Setup finishes, fill the `GHT_LOGIN_...` lines in `.env` and start with `Start.bat`.
+The only case it cannot handle by itself is a PC with no internet, since the Python
+install has to download; it says so and stops. After Setup finishes, fill the
+`GHT_LOGIN_...` lines in `.env` and start with `Start.bat`.
 
-`Start.bat` runs the same install on its own first launch (via `_ensure-env.bat`), so
-Setup is not strictly required - but it does the whole job up front, checks Python and the
-version, seeds `.env`, and reports each step, which is what a fresh machine wants.
+`Start.bat` runs the same install on its own first launch (via `_ensure-env.bat`), Python
+included, so Setup is not strictly required - `Start.bat` alone will bring a bare PC all
+the way up and then open the portal. Setup just does the install half up front and reports
+each step.
 
 ## `Start.bat`
 
@@ -51,7 +53,8 @@ Machinery `Start.bat` calls. Nothing here needs to be run by hand.
 
 | File | What it is |
 |---|---|
-| `_ensure-env.bat` | Creates the virtualenv and installs dependencies, once. |
+| `_ensure-python.bat` | Makes sure Python 3.11+ exists, installing it per-user (winget, then python.org) if not. Sets `GHT_PY` for the caller. Nothing to click. |
+| `_ensure-env.bat` | Ensures Python (via the above), then creates the virtualenv and installs dependencies, once. |
 | `_stop-portal.bat` | Kills a portal or collection browser left over from an earlier launch, so a fresh start binds the port and runs current code. Safe when nothing is running. |
 | `doctor.py` | The checks behind `Check.bat`. Read-only; runs on a bare interpreter, so it still works when the virtualenv is the thing that is broken. |
 | `serve.py` | Portal entry point. Takes `--host`, `--port`, `--reload`. |
